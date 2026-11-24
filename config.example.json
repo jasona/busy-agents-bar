@@ -1,0 +1,70 @@
+{
+  "device": {
+    "baseUrl": "http://10.0.4.20",
+    "applicationName": "agent-status",
+    "priority": 50,
+    "urgentPriority": 95,
+    "urgentOverrideTimer": false,
+    "timeoutMs": 3000
+  },
+  "daemon": {
+    "pollIntervalMs": 1000,
+    "healthIntervalMs": 5000,
+    "controlHost": "127.0.0.1",
+    "controlPort": 4388,
+    "stateFile": "~/.config/busy-bar/state.json"
+  },
+  "display": {
+    "stayOnUntilCleared": true,
+    "clearBehavior": "release",
+    "showProjectName": true
+  },
+  "alerts": {
+    "blink": {
+      "enabled": true,
+      "onWaiting": true,
+      "onError": true,
+      "onAllDone": true,
+      "colors": {
+        "waiting": "#FFAA00FF",
+        "error": "#FF0000FF",
+        "allDone": "#00FFAAFF"
+      }
+    },
+    "chime": {
+      "enabled": true,
+      "onWaiting": true,
+      "onError": true,
+      "onAllDone": true,
+      "cooldownMs": 15000,
+      "volume": null,
+      "sounds": {
+        "waiting": { "stockPath": "shared/calendar_event_starts.snd" },
+        "error": { "stockPath": "shared/calendar_event_starts.snd" },
+        "allDone": { "stockPath": "shared/volume_change.snd" }
+      }
+    }
+  },
+  "providers": {
+    "antigravity": {
+      "enabled": true,
+      "stuckAfterMs": 600000,
+      "staleAfterMs": 21600000,
+      "recentDoneWindowMs": 900000,
+      "appDataDirs": null,
+      "projectsDir": null
+    },
+    "hooks": {
+      "enabled": true,
+      "defaultTtlMs": 3600000
+    },
+    "customModules": []
+  },
+  "controls": {
+    "wsInputEnabled": true,
+    "resetButton": "back",
+    "resetAction": "press",
+    "reconnectDelayMs": 3000,
+    "debounceMs": 500
+  }
+}

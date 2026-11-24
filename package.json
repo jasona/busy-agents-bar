@@ -1,0 +1,34 @@
+{
+  "name": "busy-bar-daemon",
+  "version": "0.1.0",
+  "description": "Standalone daemon that displays real-time AI coding agent status on a BUSY Bar 72x16 RGB LED screen.",
+  "type": "module",
+  "author": "Jason Alexander",
+  "homepage": "https://github.com/jasona/busy-agents-bar#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jasona/busy-agents-bar.git"
+  },
+  "bugs": {
+    "url": "https://github.com/jasona/busy-agents-bar/issues"
+  },
+  "keywords": [
+    "busy-bar",
+    "flipper",
+    "antigravity",
+    "ai-agents",
+    "led-matrix",
+    "daemon"
+  ],
+  "bin": {
+    "busy-bar": "./bin/busy-bar.mjs"
+  },
+  "scripts": {
+    "start": "node ./bin/busy-bar.mjs daemon",
+    "test": "node --test test/*.test.mjs"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "license": "MIT"
+}
