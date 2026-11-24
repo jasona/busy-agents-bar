@@ -101,6 +101,7 @@ export class BusyBarDaemon {
     this._displayActive = false;
     this._clearedReleased = false;
     this._deviceConnected = false;
+    this._apiVersion = null;
     this._volumeApplied = false;
     this._lastDrawResult = null;
     this._lastError = null;
@@ -279,6 +280,24 @@ export class BusyBarDaemon {
     return snapshot;
   }
 
+  async _refreshApiVersion() {
+    try {
+      const ver = await this.client.getVersion();
+      const semver = typeof ver?.api_semver === 'string' ? ver.api_semver.trim() : null;
+      if (semver) {
+        this._apiVersion = semver;
+        const major = Number.parseInt(semver.split('.')[0], 10);
+        if (Number.isFinite(major) && major < 24) {
+          this._log?.warn?.(
+            `[busy-bar] device API version ${semver} is older than expected (24.x); some features may not work`
+          );
+        }
+      }
+    } catch {
+      // Non-fatal: device may be temporarily offline at startup.
+    }
+  }
+
   /**
    * Checks device reachability when disconnected and immediately re-syncs on USB reconnect.
    */
@@ -288,6 +307,9 @@ export class BusyBarDaemon {
       await this.client.getStatus();
       this._deviceConnected = true;
       this._lastError = null;
+      if (!this._apiVersion) {
+        await this._refreshApiVersion();
+      }
       await this.sync({ forceRedraw: true });
       return true;
     } catch (err) {
@@ -388,6 +410,7 @@ export class BusyBarDaemon {
   getStatus() {
     return {
       connected: this._deviceConnected,
+      apiVersion: this._apiVersion,
       uptimeSec: Math.max(0, Math.floor((this._now() - this._startedAtMs) / 1000)),
       clearedAtMs: this._clearedAtMs,
       dismissedCount: Object.keys(this._dismissed).length,
@@ -422,6 +445,7 @@ export class BusyBarDaemon {
       await this._controlServer.start();
     }
 
+    await this._refreshApiVersion();
     await this.sync({ forceRedraw: true });
 
     if (enableInputWatcher && this._inputWatcher) {
@@ -460,6 +484,15 @@ export class BusyBarDaemon {
     if (this._controlServer) {
       await this._controlServer.stop();
       this._controlServer = null;
+    }
+    if (this.config.display?.clearOnShutdown !== false && this._displayActive) {
+      const appName = this.config.device?.applicationName || 'agent-status';
+      try {
+        await this.client.clearDisplay(appName);
+      } catch {
+        // Best-effort clear on shutdown.
+      }
+      this._displayActive = false;
     }
     await this.registry.stopAll();
   }

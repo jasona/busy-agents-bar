@@ -7,6 +7,7 @@ export const DEFAULT_CONFIG_PATH = '~/.config/busy-bar/config.json';
 export const DEFAULT_CONFIG = {
   device: {
     baseUrl: 'http://10.0.4.20',
+    apiToken: null,
     applicationName: 'agent-status',
     priority: 50,
     urgentPriority: 95,
@@ -23,6 +24,7 @@ export const DEFAULT_CONFIG = {
   display: {
     stayOnUntilCleared: true,
     clearBehavior: 'release',
+    clearOnShutdown: true,
     showProjectName: true,
   },
   alerts: {
@@ -163,6 +165,9 @@ export function loadConfig({ configPath, overrides = {}, env = process.env, home
   const envOverrides = {};
   if (env.BUSY_BAR_URL) {
     envOverrides.device = { ...(envOverrides.device || {}), baseUrl: env.BUSY_BAR_URL.trim() };
+  }
+  if (typeof env.BUSY_BAR_TOKEN === 'string' && env.BUSY_BAR_TOKEN.trim()) {
+    envOverrides.device = { ...(envOverrides.device || {}), apiToken: env.BUSY_BAR_TOKEN.trim() };
   }
   const blinkEnv = parseBoolEnv(env.BUSY_BAR_BLINK);
   if (blinkEnv !== undefined) {

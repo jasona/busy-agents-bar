@@ -12,6 +12,7 @@ export class BusyBarClient {
   constructor(config = {}) {
     const dev = config.device || config;
     this.baseUrl = String(dev.baseUrl || 'http://10.0.4.20').replace(/\/+$/, '');
+    this.apiToken = dev.apiToken ? String(dev.apiToken).trim() || null : null;
     this.applicationName = String(dev.applicationName || 'agent-status');
     this.timeoutMs = Math.max(500, Number(dev.timeoutMs ?? DEFAULT_TIMEOUT_MS));
   }
@@ -22,6 +23,13 @@ export class BusyBarClient {
     const headers = {
       Connection: 'close',
     };
+    if (this.apiToken) {
+      if (targetUrl.hostname === 'api.busy.app') {
+        headers.Authorization = `Bearer ${this.apiToken}`;
+      } else {
+        headers['X-API-Token'] = this.apiToken;
+      }
+    }
     let payloadStr = null;
     if (jsonBody !== undefined) {
       payloadStr = JSON.stringify(jsonBody);
@@ -136,6 +144,11 @@ export class BusyBarClient {
     const { ok, status, body } = await this._request('POST', '/api/audio/play', {
       jsonBody: payload,
     });
+    return { ok, status, body };
+  }
+
+  async stopAudio() {
+    const { ok, status, body } = await this._request('DELETE', '/api/audio/play');
     return { ok, status, body };
   }
 

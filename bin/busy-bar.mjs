@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -10,6 +10,7 @@ import { BusyBarInputWatcher } from '../src/busybar/ws-input.mjs';
 import { loadConfig } from '../src/config.mjs';
 import { BusyBarDaemon } from '../src/daemon.mjs';
 import { buildFleetSnapshot } from '../src/model.mjs';
+import { installHooksForTargets } from '../src/providers/hooks-install.mjs';
 import { createProviderRegistry } from '../src/providers/index.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -56,6 +57,9 @@ function buildConfigOverrides(flags) {
   const overrides = {};
   if (typeof flags.url === 'string') {
     overrides.device = { ...(overrides.device || {}), baseUrl: flags.url };
+  }
+  if (typeof flags.token === 'string' && flags.token.trim()) {
+    overrides.device = { ...(overrides.device || {}), apiToken: flags.token.trim() };
   }
   if (flags.port !== undefined && flags.port !== true) {
     const port = Number(flags.port);
@@ -156,7 +160,7 @@ function printHelp() {
   console.log(`busy-bar - Real-time agent status display daemon for BUSY Bar
 
 Usage:
-  busy-bar daemon [--config <path>] [--no-blink] [--no-chime] [--no-buttons] [--reset-button <back|ok|start>] [--port <n>] [--url <url>]
+  busy-bar daemon [--config <path>] [--no-blink] [--no-chime] [--no-buttons] [--reset-button <back|ok|start>] [--port <n>] [--url <url>] [--token <token>]
   busy-bar status [--once]
   busy-bar clear
   busy-bar reset
@@ -168,8 +172,10 @@ Usage:
   busy-bar sounds
   busy-bar alerts [--blink on|off] [--chime on|off]
   busy-bar watch-buttons
+  busy-bar hook <claude|codex|chatgpt|antigravity> [--event <name>]
+  busy-bar install-hooks [all|antigravity|claude|codex|chatgpt ...] [--dry-run] [--uninstall]
   busy-bar install-service [--dry-run]
-  busy-bar install-hook [--dry-run]
+  busy-bar install-hook [--dry-run] [--uninstall]
 
 Emit options:
   --attention <approval|question|error|quota|stuck>
@@ -184,7 +190,7 @@ async function cmdDaemon(config) {
   await daemon.start();
   const st = daemon.getStatus();
   console.log(
-    `[busy-bar] daemon started (device=${config.device.baseUrl}, connected=${st.connected}, control=${st.controlUrl}, phase=${st.snapshot?.phase})`
+    `[busy-bar] daemon started (device=${config.device.baseUrl}, api=${st.apiVersion || 'unknown'}, connected=${st.connected}, control=${st.controlUrl}, phase=${st.snapshot?.phase})`
   );
 
   let stopping = false;
@@ -451,6 +457,7 @@ function cmdWatchButtons(config) {
 }
 
 async function readStdinText() {
+  if (process.stdin.isTTY) return '';
   const chunks = [];
   for await (const chunk of process.stdin) {
     chunks.push(chunk);
@@ -479,43 +486,71 @@ async function cmdAgyStopHook(config) {
   console.log('{}');
 }
 
-function cmdInstallHook(flags) {
-  const hooksPath = join(homedir(), '.gemini', 'config', 'hooks.json');
-  const binPath = join(ROOT_DIR, 'bin', 'busy-bar.mjs');
-  let existing = {};
-  if (existsSync(hooksPath)) {
-    try {
-      const parsed = JSON.parse(readFileSync(hooksPath, 'utf-8'));
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        existing = parsed;
-      }
-    } catch (err) {
-      throw new Error(`Failed to parse existing ${hooksPath}: ${err.message}`);
-    }
+async function cmdHook(config, args, flags) {
+  const providerArg = String(args[0] || '').trim().toLowerCase();
+  if (!providerArg) {
+    throw new Error('hook requires a target provider (claude, codex, chatgpt, or antigravity)');
   }
-
-  const nextHooks = {
-    ...existing,
-    'busy-bar-stop': {
-      Stop: [
-        {
-          type: 'command',
-          command: `${process.execPath} ${binPath} agy-stop-hook`,
-          timeout: 3,
-        },
-      ],
-    },
-  };
-
-  const rendered = JSON.stringify(nextHooks, null, 2) + '\n';
-  if (flags['dry-run']) {
-    console.log(`# Target: ${hooksPath}\n${rendered}`);
+  if (providerArg === 'antigravity' || providerArg === 'agy') {
+    await cmdAgyStopHook(config);
     return;
   }
 
-  mkdirSync(dirname(hooksPath), { recursive: true });
-  writeFileSync(hooksPath, rendered, 'utf-8');
-  console.log(`Installed Antigravity Stop hook in ${hooksPath}`);
+  const routeMap = {
+    claude: 'claude-code',
+    'claude-code': 'claude-code',
+    codex: 'codex',
+    chatgpt: 'codex',
+  };
+  const routeProvider = routeMap[providerArg];
+  if (!routeProvider) {
+    throw new Error(`Unknown hook target "${providerArg}" (expected claude, codex, chatgpt, or antigravity)`);
+  }
+
+  try {
+    const trailingJson = args.slice(1).find((a) => typeof a === 'string' && a.trim().startsWith('{'));
+    const raw = trailingJson || (await readStdinText());
+    let payload = raw ? JSON.parse(raw) : {};
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      payload = {};
+    }
+    if (typeof flags.event === 'string' && flags.event.trim() && !payload.hook_event_name && !payload.event) {
+      payload.hook_event_name = flags.event.trim();
+    }
+    if (Object.keys(payload).length > 0) {
+      await fetch(`${controlUrlOf(config)}/hooks/${encodeURIComponent(routeProvider)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(300),
+      });
+    }
+  } catch {
+    // Observe-only: fail open silently so Claude Code / Codex are never blocked.
+  }
+}
+
+function cmdInstallHooks(args, flags, defaultTargets = ['all']) {
+  const targets = args.length > 0 ? args : defaultTargets;
+  const binPath = join(ROOT_DIR, 'bin', 'busy-bar.mjs');
+  const results = installHooksForTargets(targets, {
+    binPath,
+    nodeBin: process.execPath,
+    dryRun: Boolean(flags['dry-run']),
+    uninstall: Boolean(flags.uninstall),
+  });
+
+  if (flags['dry-run']) {
+    for (const r of results) {
+      console.log(`# Target (${r.target}): ${r.path}\n${r.content}`);
+    }
+    return;
+  }
+
+  for (const r of results) {
+    const verb = r.action === 'uninstall' ? 'Removed' : r.changed ? 'Installed' : 'Already up to date';
+    console.log(`[${r.target}] ${verb}: ${r.path}`);
+  }
 }
 
 async function main() {
@@ -566,11 +601,17 @@ async function main() {
     case 'watch-buttons':
       cmdWatchButtons(config);
       break;
+    case 'hook':
+      await cmdHook(config, args, flags);
+      break;
     case 'agy-stop-hook':
       await cmdAgyStopHook(config);
       break;
     case 'install-hook':
-      cmdInstallHook(flags);
+      cmdInstallHooks(args, flags, ['antigravity']);
+      break;
+    case 'install-hooks':
+      cmdInstallHooks(args, flags, ['all']);
       break;
     case 'install-service':
       cmdInstallService(flags);

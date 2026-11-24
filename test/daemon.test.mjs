@@ -17,6 +17,8 @@ function startMockBusyBar() {
     events: [],
     audioCalls: [],
     statusCalls: 0,
+    versionCalls: 0,
+    lastAuthHeader: null,
     nextDrawStatus: 200,
     offline: false,
   };
@@ -28,12 +30,20 @@ function startMockBusyBar() {
       return;
     }
 
+    state.lastAuthHeader = req.headers['x-api-token'] || req.headers.authorization || null;
     const url = new URL(req.url || '/', 'http://127.0.0.1');
     const chunks = [];
     req.on('data', (c) => chunks.push(c));
     req.on('end', () => {
       const raw = Buffer.concat(chunks).toString('utf-8');
       const json = raw ? JSON.parse(raw) : null;
+
+      if (req.method === 'GET' && url.pathname === '/api/version') {
+        state.versionCalls++;
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ api_semver: '24.3.0' }));
+        return;
+      }
 
       if (req.method === 'GET' && url.pathname === '/api/status') {
         state.statusCalls++;
@@ -133,6 +143,9 @@ test('BusyBarDaemon end-to-end: draw-on-change, ALL DONE latch, clear, hooks, al
     await daemon.start({ enableControlServer: true });
     const controlUrl = daemon.getStatus().controlUrl;
     assert.ok(controlUrl);
+    assert.equal(daemon.getStatus().apiVersion, '24.3.0');
+    assert.equal(mock.state.versionCalls, 1);
+    assert.equal(mock.state.lastAuthHeader, null);
 
     // Startup drew once (running), no startup chime
     assert.equal(mock.state.drawCalls.length, 1);
@@ -341,6 +354,62 @@ test('BusyBarDaemon reset, dismiss, and physical button watcher behavior', async
   } finally {
     await daemon.stop();
     assert.equal(fakeWatcher.stopped, true);
+    await mock.close();
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('BusyBarClient sends X-API-Token and daemon honors clearOnShutdown true vs false', async () => {
+  const mock = await startMockBusyBar();
+  const tmp = mkdtempSync(join(tmpdir(), 'busy-bar-shutdown-'));
+  const clock = 1_700_000_000_000;
+
+  try {
+    // 1. Token header + clearOnShutdown: true clears display on stop()
+    const reg1 = new ProviderRegistry();
+    reg1.register({
+      id: 'antigravity',
+      label: 'Antigravity',
+      poll: () => [{ id: 's1', provider: 'antigravity', project: 'app', status: 'running', updatedAtMs: clock }],
+    });
+    const cfg1 = loadConfig({
+      overrides: {
+        device: { baseUrl: mock.url, apiToken: 'wifi-secret-123', timeoutMs: 1000 },
+        daemon: { pollIntervalMs: 60000, healthIntervalMs: 60000, controlPort: null, stateFile: join(tmp, 's1.json') },
+        display: { clearOnShutdown: true },
+        alerts: { blink: { enabled: false }, chime: { enabled: false } },
+        controls: { wsInputEnabled: false },
+      },
+    });
+    const d1 = new BusyBarDaemon({ config: cfg1, registry: reg1, nowFn: () => clock });
+    await d1.start({ enableControlServer: false });
+    assert.equal(mock.state.lastAuthHeader, 'wifi-secret-123');
+    const clearsBeforeStop1 = mock.state.clearCalls.length;
+    await d1.stop();
+    assert.equal(mock.state.clearCalls.length, clearsBeforeStop1 + 1);
+
+    // 2. clearOnShutdown: false preserves display on stop()
+    const reg2 = new ProviderRegistry();
+    reg2.register({
+      id: 'antigravity',
+      label: 'Antigravity',
+      poll: () => [{ id: 's2', provider: 'antigravity', project: 'app', status: 'running', updatedAtMs: clock }],
+    });
+    const cfg2 = loadConfig({
+      overrides: {
+        device: { baseUrl: mock.url, timeoutMs: 1000 },
+        daemon: { pollIntervalMs: 60000, healthIntervalMs: 60000, controlPort: null, stateFile: join(tmp, 's2.json') },
+        display: { clearOnShutdown: false },
+        alerts: { blink: { enabled: false }, chime: { enabled: false } },
+        controls: { wsInputEnabled: false },
+      },
+    });
+    const d2 = new BusyBarDaemon({ config: cfg2, registry: reg2, nowFn: () => clock });
+    await d2.start({ enableControlServer: false });
+    const clearsBeforeStop2 = mock.state.clearCalls.length;
+    await d2.stop();
+    assert.equal(mock.state.clearCalls.length, clearsBeforeStop2);
+  } finally {
     await mock.close();
     rmSync(tmp, { recursive: true, force: true });
   }

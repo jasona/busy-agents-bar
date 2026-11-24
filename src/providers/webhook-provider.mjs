@@ -1,50 +1,9 @@
 import { normalizeSession } from '../model.mjs';
+import { genericHookAdapter, registerBuiltinHookAdapters } from './adapters/index.mjs';
+
+export { genericHookAdapter };
 
 const adapters = new Map();
-
-/**
- * Built-in generic webhook adapter transforming standard hook payloads into AgentSession fields.
- */
-export function genericHookAdapter(providerName, payload, now = Date.now()) {
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-    throw new Error('Hook payload must be a JSON object');
-  }
-  const sessionId = String(payload.sessionId ?? payload.session_id ?? payload.id ?? '').trim();
-  if (!sessionId) {
-    throw new Error('Hook payload requires sessionId');
-  }
-  const status = String(payload.status ?? 'running').trim().toLowerCase();
-  const attentionKind = payload.attentionKind ?? payload.attention_kind ?? null;
-  const updatedAtMs = Number.isFinite(Number(payload.updatedAtMs))
-    ? Number(payload.updatedAtMs)
-    : now;
-  const startedAtMs = Number.isFinite(Number(payload.startedAtMs))
-    ? Number(payload.startedAtMs)
-    : updatedAtMs;
-  const ttlMs = payload.ttlMs === undefined || payload.ttlMs === null
-    ? undefined
-    : Math.max(1000, Number(payload.ttlMs) || 0);
-
-  return {
-    session: normalizeSession({
-      id: sessionId,
-      provider: String(payload.provider || providerName || 'hooks').trim() || 'hooks',
-      project: payload.project ?? 'general',
-      title: payload.title ?? sessionId,
-      status,
-      attentionKind,
-      activity: payload.activity ?? '',
-      updatedAtMs,
-      startedAtMs,
-      isSwarm: Boolean(payload.isSwarm),
-      swarmWorkingCount: payload.swarmWorkingCount ?? 0,
-      swarmTotalCount: payload.swarmTotalCount ?? 0,
-    }),
-    ttlMs,
-  };
-}
-
-adapters.set('generic', genericHookAdapter);
 
 /**
  * Registers a custom webhook payload adapter for a named provider (e.g. "claude-code", "codex").
@@ -57,6 +16,8 @@ export function registerHookAdapter(providerName, transformFn) {
   }
   adapters.set(key, transformFn);
 }
+
+registerBuiltinHookAdapters(registerHookAdapter);
 
 /**
  * Unregisters a custom hook adapter (useful in tests). Cannot remove the built-in generic adapter.
@@ -93,11 +54,25 @@ export class HookProvider {
 
   /**
    * Ingests a hook payload for `providerName`, normalizing via a registered adapter or generic fallback.
+   * Returns the normalized session on upsert, or null if the event was ignored or removed a session.
    */
   ingest(providerName, payload, now = Date.now()) {
     const provKey = String(providerName || 'generic').trim().toLowerCase() || 'generic';
     const adapter = adapters.get(provKey) || adapters.get('generic');
     const adapted = adapter(provKey, payload, now);
+
+    if (adapted == null || adapted.ignore) {
+      return null;
+    }
+
+    if (adapted.remove) {
+      const targetProv = String(adapted.provider || provKey).trim().toLowerCase() || provKey;
+      const targetId = String(adapted.sessionId ?? '').trim();
+      if (targetId) {
+        this.remove(targetProv, targetId);
+      }
+      return null;
+    }
 
     const rawSession = adapted && adapted.session ? adapted.session : adapted;
     const ttlMs =

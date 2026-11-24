@@ -1,6 +1,7 @@
 {
   "device": {
     "baseUrl": "http://10.0.4.20",
+    "apiToken": null,
     "applicationName": "agent-status",
     "priority": 50,
     "urgentPriority": 95,
@@ -17,6 +18,7 @@
   "display": {
     "stayOnUntilCleared": true,
     "clearBehavior": "release",
+    "clearOnShutdown": true,
     "showProjectName": true
   },
   "alerts": {

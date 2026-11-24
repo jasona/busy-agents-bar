@@ -187,7 +187,7 @@ export function createControlServer({ daemon, hookProvider, host = '127.0.0.1', 
             const now = typeof daemon._now === 'function' ? daemon._now() : Date.now();
             const session = hookProvider.ingest(providerName, body, now);
             const snapshot = await daemon.sync();
-            return jsonReply(res, 200, { ok: true, session, snapshot });
+            return jsonReply(res, 200, { ok: true, session, ignored: !session, snapshot });
           } catch (err) {
             return jsonReply(res, 400, { ok: false, error: err?.message || 'Invalid hook payload' });
           }

@@ -82,17 +82,24 @@ systemctl --user enable --now busy-bar.service
 systemctl --user status busy-bar.service
 ```
 
-### Optional: Auto-dismiss canceled Antigravity prompts (`Stop` hook)
+### Install Provider Hooks (Claude Code, Codex / ChatGPT, Antigravity)
 
-When you manually stop an Antigravity agent mid-turn, Antigravity does not append a cancellation step to `transcript.jsonl`, though it can invoke a `Stop` hook with `"terminationReason": "USER_CANCELED"`:
+Built-in native hook adapters and idempotent installers ship for **Claude Code** (`~/.claude/settings.json`), **OpenAI Codex / ChatGPT** (`~/.codex/hooks.json`), and **Antigravity** (`~/.gemini/config/hooks.json`). All existing user hooks and settings are preserved untouched:
 
 ```bash
-# Preview the hook entry first
-node ./bin/busy-bar.mjs install-hook --dry-run
+# Preview the merged hook changes for all supported agents
+node ./bin/busy-bar.mjs install-hooks all --dry-run
 
-# Merge "busy-bar-stop" into ~/.gemini/config/hooks.json
-node ./bin/busy-bar.mjs install-hook
+# Install Claude Code and Codex/ChatGPT hooks (or use "all" to include Antigravity)
+node ./bin/busy-bar.mjs install-hooks claude codex
+
+# Remove only busy-bar's managed hooks cleanly
+node ./bin/busy-bar.mjs install-hooks all --uninstall
 ```
+
+- **Claude Code (`~/.claude/settings.json`)**: Hooks `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PermissionRequest`, `Notification` (`permission_prompt`, `elicitation_dialog`, errors; ignores `idle_prompt`), `Stop`, and `SessionEnd` via `busy-bar hook claude`.
+- **Codex / ChatGPT (`~/.codex/hooks.json`)**: Hooks `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PermissionRequest`, `Stop`, `Interrupt`, and `SessionEnd` via `busy-bar hook codex` (also supports legacy Codex `notify` `agent-turn-complete` payloads). Note that Codex prompts or records hook trust under `[hooks.state]` in `~/.codex/config.toml` the first time you run a session with new hooks.
+- **Antigravity (`~/.gemini/config/hooks.json`)**: Adds `"busy-bar-stop"` to auto-dismiss turns when `Stop` fires with `"terminationReason": "USER_CANCELED"`.
 
 ---
 
@@ -116,7 +123,7 @@ Button listener notes:
 ## CLI Reference
 
 ```text
-busy-bar daemon [--config <path>] [--no-blink] [--no-chime] [--no-buttons] [--reset-button <back|ok|start|none>] [--port <n>] [--url <url>]
+busy-bar daemon [--config <path>] [--no-blink] [--no-chime] [--no-buttons] [--reset-button <back|ok|start|none>] [--port <n>] [--url <url>] [--token <token>]
 busy-bar status [--once]
 busy-bar clear
 busy-bar reset
@@ -128,14 +135,17 @@ busy-bar test-chime [waiting|error|all_done]
 busy-bar sounds
 busy-bar alerts [--blink on|off] [--chime on|off]
 busy-bar watch-buttons
+busy-bar hook <claude|codex|chatgpt|antigravity> [--event <name>]
+busy-bar install-hooks [all|antigravity|claude|codex|chatgpt ...] [--dry-run] [--uninstall]
 busy-bar install-service [--dry-run]
-busy-bar install-hook [--dry-run]
+busy-bar install-hook [--dry-run] [--uninstall]
 ```
 
 | Flag | Description |
 | :--- | :--- |
 | `--config <path>` | Path to custom JSON config file (default `~/.config/busy-bar/config.json`) |
 | `--url <url>` | Override BUSY Bar base URL (default `http://10.0.4.20`) |
+| `--token <token>` | Optional API token for Wi-Fi (`X-API-Token`) or cloud (`Authorization: Bearer`) access |
 | `--port <n>` | Override loopback control server port (default `4388`) |
 | `--no-blink` / `--blink` | Disable or enable LED notification blinking |
 | `--no-chime` / `--chime` | Disable or enable audio chimes |
@@ -186,6 +196,7 @@ Copy [`config.example.json`](./config.example.json) to `~/.config/busy-bar/confi
 {
   "device": {
     "baseUrl": "http://10.0.4.20",
+    "apiToken": null,
     "applicationName": "agent-status",
     "priority": 50,
     "urgentPriority": 95,
@@ -202,6 +213,7 @@ Copy [`config.example.json`](./config.example.json) to `~/.config/busy-bar/confi
   "display": {
     "stayOnUntilCleared": true,
     "clearBehavior": "release",
+    "clearOnShutdown": true,
     "showProjectName": true
   },
   "alerts": {
@@ -261,6 +273,7 @@ Copy [`config.example.json`](./config.example.json) to `~/.config/busy-bar/confi
 | :--- | :--- |
 | `BUSY_BAR_CONFIG` | Config JSON path |
 | `BUSY_BAR_URL` | BUSY Bar base URL |
+| `BUSY_BAR_TOKEN` | Optional Wi-Fi / cloud API token |
 | `BUSY_BAR_PORT` | Loopback HTTP control port |
 | `BUSY_BAR_BLINK` | `true` / `false` |
 | `BUSY_BAR_CHIME` | `true` / `false` |
@@ -365,15 +378,23 @@ busy-agents-bar/
 │       ├── index.mjs                    # Registry factory from config
 │       ├── registry.mjs                 # Multi-provider polling, error isolation, custom ESM module loader
 │       ├── webhook-provider.mjs         # Push-based HookProvider + adapter registry
+│       ├── hooks-install.mjs            # Idempotent hook installers for Claude Code, Codex, Antigravity
+│       ├── adapters/
+│       │   ├── index.mjs                # Built-in adapter registration
+│       │   ├── generic.mjs              # Generic normalized payload adapter
+│       │   ├── claude-code.mjs          # Claude Code hook payload adapter
+│       │   └── codex.mjs                # OpenAI Codex / ChatGPT hook payload adapter
 │       └── antigravity/
 │           ├── discovery.mjs            # Brain directory & workspace project discovery
 │           ├── index.mjs                # AntigravityProvider (fs.watch + polling)
 │           ├── swarm.mjs                # Swarm roster/board/view parser & worker deduplication
 │           └── transcript.mjs           # Cached JSONL transcript state analyzer
 └── test/                                # node:test unit & end-to-end suites
+    ├── adapters.test.mjs
     ├── alerts.test.mjs
     ├── antigravity.test.mjs
     ├── daemon.test.mjs
+    ├── hooks-install.test.mjs
     ├── model.test.mjs
     ├── providers.test.mjs
     ├── renderer.test.mjs
