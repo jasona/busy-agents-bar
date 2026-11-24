@@ -246,12 +246,15 @@ export class BusyBarInputWatcher {
   constructor({
     baseUrl = 'http://10.0.4.20',
     enabled = true,
+    multiButton = false,
+    longPressMs = 700,
     resetButton = 'back',
     resetAction = 'press',
     reconnectDelayMs = 3000,
     debounceMs = 500,
     onButton = null,
     onReset = null,
+    onGesture = null,
     WebSocketImpl = globalThis.WebSocket,
     nowFn = () => Date.now(),
   } = {}) {
@@ -262,6 +265,8 @@ export class BusyBarInputWatcher {
     this.wsUrl = u.toString();
 
     this.enabled = Boolean(enabled);
+    this.multiButton = Boolean(multiButton || onGesture);
+    this.longPressMs = Math.max(20, Number(longPressMs ?? 700));
     this.resetButton = resetButton ? String(resetButton).trim().toLowerCase() : null;
     this.resetAction = String(resetAction || 'press').trim().toLowerCase();
     this.reconnectDelayMs = Math.max(50, Number(reconnectDelayMs ?? 3000));
@@ -269,6 +274,7 @@ export class BusyBarInputWatcher {
 
     this._onButton = onButton;
     this._onReset = onReset;
+    this._onGesture = onGesture;
     this._WebSocket = WebSocketImpl;
     this._now = nowFn;
 
@@ -279,6 +285,7 @@ export class BusyBarInputWatcher {
     this._currentDelayMs = this.reconnectDelayMs;
     this._lastResetAt = -Infinity;
     this._lastButtonEvent = null;
+    this._pressState = new Map();
   }
 
   getStatus() {
@@ -286,10 +293,22 @@ export class BusyBarInputWatcher {
       enabled: this.enabled,
       connected: this._connected,
       wsUrl: this.wsUrl,
+      multiButton: this.multiButton,
+      longPressMs: this.longPressMs,
       resetButton: this.resetButton,
       resetAction: this.resetAction,
       lastButtonEvent: this._lastButtonEvent,
     };
+  }
+
+  _clearPressStates() {
+    for (const entry of this._pressState.values()) {
+      if (entry.timer) {
+        clearTimeout(entry.timer);
+        entry.timer = null;
+      }
+    }
+    this._pressState.clear();
   }
 
   start() {
@@ -303,6 +322,7 @@ export class BusyBarInputWatcher {
   stop() {
     this._stopped = true;
     this._connected = false;
+    this._clearPressStates();
     if (this._reconnectTimer) {
       clearTimeout(this._reconnectTimer);
       this._reconnectTimer = null;
@@ -346,7 +366,9 @@ export class BusyBarInputWatcher {
       } catch {
         // Isolate user callback errors.
       }
-      if (
+      if (this._onGesture) {
+        await this._handleGestureEvent(evt, now);
+      } else if (
         this.resetButton &&
         evt.button === this.resetButton &&
         evt.action === this.resetAction &&
@@ -357,6 +379,55 @@ export class BusyBarInputWatcher {
           await this._onReset?.(evt);
         } catch {
           // Isolate reset handler errors.
+        }
+      }
+    }
+  }
+
+  async _handleGestureEvent(evt, now) {
+    if (evt.action === 'press') {
+      const existing = this._pressState.get(evt.button);
+      if (existing?.timer) {
+        clearTimeout(existing.timer);
+      }
+      const entry = {
+        pressAtMs: now,
+        longFired: false,
+        timer: null,
+      };
+      entry.timer = setTimeout(() => {
+        entry.timer = null;
+        if (this._stopped) return;
+        entry.longFired = true;
+        Promise.resolve(
+          this._onGesture?.({
+            button: evt.button,
+            gesture: 'long_press',
+            durationMs: this.longPressMs,
+          })
+        ).catch(() => {});
+      }, this.longPressMs);
+      this._pressState.set(evt.button, entry);
+      return;
+    }
+
+    if (evt.action === 'release') {
+      const entry = this._pressState.get(evt.button);
+      if (!entry) return;
+      this._pressState.delete(evt.button);
+      if (entry.timer) {
+        clearTimeout(entry.timer);
+        entry.timer = null;
+      }
+      if (!entry.longFired) {
+        try {
+          await this._onGesture?.({
+            button: evt.button,
+            gesture: 'short_press',
+            durationMs: Math.max(0, now - entry.pressAtMs),
+          });
+        } catch {
+          // Isolate gesture handler errors.
         }
       }
     }
@@ -399,6 +470,7 @@ export class BusyBarInputWatcher {
         this._ws = null;
         this._connected = false;
       }
+      this._clearPressStates();
       if (!this._stopped) this._scheduleReconnect();
     });
 

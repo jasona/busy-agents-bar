@@ -39,6 +39,8 @@ export function normalizeSession(raw) {
 
   const updatedAtMs = nonNegInt(raw.updatedAtMs, 0);
   const startedAtMs = nonNegInt(raw.startedAtMs, updatedAtMs);
+  const turnStartedAtMs = nonNegInt(raw.turnStartedAtMs, startedAtMs);
+  const steps = nonNegInt(raw.steps, 0);
   const isSwarm = Boolean(raw.isSwarm);
   const swarmTotalCount = isSwarm ? Math.max(1, nonNegInt(raw.swarmTotalCount, 1)) : 0;
   const swarmWorkingCount = isSwarm ? nonNegInt(raw.swarmWorkingCount, 0) : 0;
@@ -53,6 +55,8 @@ export function normalizeSession(raw) {
     activity: String(raw.activity ?? '').trim(),
     updatedAtMs,
     startedAtMs,
+    turnStartedAtMs,
+    steps,
     isSwarm,
     swarmWorkingCount,
     swarmTotalCount,
@@ -131,6 +135,7 @@ export function buildFleetSnapshot(
 
   const primarySession = visibleSessions[0] || null;
 
+  const trimAct = (s) => (s.activity || '').slice(0, 48);
   const fingerprintInput = {
     phase,
     counts,
@@ -141,9 +146,20 @@ export function buildFleetSnapshot(
           project: primarySession.project,
           status: primarySession.status,
           attentionKind: primarySession.attentionKind,
+          activity: trimAct(primarySession),
+          swarmWorkingCount: primarySession.swarmWorkingCount,
+          swarmTotalCount: primarySession.swarmTotalCount,
         }
       : null,
-    pips: visibleSessions.slice(0, 18).map((s) => [s.provider, s.id, s.status, s.attentionKind]),
+    pips: visibleSessions.slice(0, 18).map((s) => [
+      s.provider,
+      s.id,
+      s.status,
+      s.attentionKind,
+      trimAct(s),
+      s.swarmWorkingCount,
+      s.swarmTotalCount,
+    ]),
   };
 
   const fingerprint = createHash('sha256')
@@ -206,4 +222,23 @@ export function detectTransitions(prevSnapshot, nextSnapshot) {
   }
 
   return transitions;
+}
+
+/**
+ * Counts sessions that transitioned into `'done'` since `prevSnapshot` (returns 0 on startup).
+ */
+export function countNewCompletions(prevSnapshot, nextSnapshot) {
+  if (!prevSnapshot || !nextSnapshot) return 0;
+  const prevByKey = new Map(
+    (prevSnapshot.sessions || []).map((s) => [`${s.provider}:${s.id}`, s])
+  );
+  let newlyDone = 0;
+  for (const s of nextSnapshot.sessions || []) {
+    if (s.status !== 'done') continue;
+    const prev = prevByKey.get(`${s.provider}:${s.id}`);
+    if (!prev || prev.status !== 'done') {
+      newlyDone++;
+    }
+  }
+  return newlyDone;
 }

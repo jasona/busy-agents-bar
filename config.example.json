@@ -19,7 +19,20 @@
     "stayOnUntilCleared": true,
     "clearBehavior": "release",
     "clearOnShutdown": true,
-    "showProjectName": true
+    "showProjectName": true,
+    "animations": true,
+    "showTimers": true,
+    "providerColors": true,
+    "carousel": {
+      "enabled": true,
+      "intervalMs": 5000,
+      "modes": ["fleet", "spotlight"]
+    },
+    "urgencyEscalation": {
+      "enabled": true,
+      "elevatedAfterMs": 120000,
+      "criticalAfterMs": 300000
+    }
   },
   "alerts": {
     "blink": {
@@ -64,6 +77,8 @@
   },
   "controls": {
     "wsInputEnabled": true,
+    "multiButton": true,
+    "longPressMs": 700,
     "resetButton": "back",
     "resetAction": "press",
     "reconnectDelayMs": 3000,

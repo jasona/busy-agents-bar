@@ -272,6 +272,8 @@ export function summarizeTranscript(appDataOrPath, convId) {
   let last = null;
   let updatedAtMs = s.mtime;
   let startedAtMs = 0;
+  let turnStartedAtMs = 0;
+  let firstStepInTurnAtMs = 0;
 
   for (const step of steps) {
     if (step.created_at) {
@@ -285,12 +287,12 @@ export function summarizeTranscript(appDataOrPath, convId) {
 
   for (let i = steps.length - 1; i >= 0; i--) {
     const step = steps[i];
+    const stepMs = step.created_at ? Date.parse(String(step.created_at)) : NaN;
     if (i === steps.length - 1 && Number.isFinite(step.step_index)) {
       totalSteps = Math.max(totalSteps, step.step_index + 1);
     }
-    if (i === steps.length - 1 && step.created_at) {
-      const parsedMs = Date.parse(String(step.created_at));
-      if (Number.isFinite(parsedMs)) updatedAtMs = Math.max(updatedAtMs, parsedMs);
+    if (i === steps.length - 1 && Number.isFinite(stepMs)) {
+      updatedAtMs = Math.max(updatedAtMs, stepMs);
     }
     if (!last) {
       last = {
@@ -299,7 +301,13 @@ export function summarizeTranscript(appDataOrPath, convId) {
         error: typeof step.error === 'string' ? oneLine(step.error, 240) : '',
       };
     }
-    if (step.type === 'USER_INPUT') break;
+    if (step.type === 'USER_INPUT') {
+      if (Number.isFinite(stepMs)) turnStartedAtMs = stepMs;
+      break;
+    }
+    if (Number.isFinite(stepMs)) {
+      firstStepInTurnAtMs = stepMs;
+    }
     if (step.type !== 'PLANNER_RESPONSE') continue;
     const calls = Array.isArray(step.tool_calls) ? step.tool_calls : [];
     if (calls.some((tc) => tc?.name === 'swarm_wait')) break;
@@ -308,11 +316,13 @@ export function summarizeTranscript(appDataOrPath, convId) {
     const heading = thinkingHeading(step.thinking);
     if (label && !activity) {
       activity = label;
-      break;
     } else if (heading && !activity) {
       activity = heading;
-      break;
     }
+  }
+
+  if (!turnStartedAtMs) {
+    turnStartedAtMs = firstStepInTurnAtMs || startedAtMs || updatedAtMs;
   }
 
   const idle = turnEnded(steps);
@@ -336,6 +346,7 @@ export function summarizeTranscript(appDataOrPath, convId) {
     mtime: s.mtime,
     updatedAtMs,
     startedAtMs: startedAtMs || updatedAtMs,
+    turnStartedAtMs,
   };
 
   const entry = { key, summary };

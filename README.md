@@ -11,36 +11,54 @@ Built for **Antigravity** out of the box (transcript + swarm telemetry), with a 
 
 ---
 
-## Visual Display Layout (`72 × 16` Front RGB)
+## Visual Display Modes (`72 × 16` Front RGB)
 
-The renderer splits the front matrix into two clean bands plus a left status accent bar:
+While active (`running`, `waiting`, or `error`), the daemon auto-rotates between **Fleet** and **Spotlight** views every 5 seconds (configurable), snaps immediately back to **Fleet** when an urgent approval/error arrives, and stays calm in **Fleet** for `ALL DONE`:
+
+1. **Fleet Overview (`fleet`)** — Gradient left status rail + stock status icon (`spinner_front_8x8.anim`, `hourglass_5x5.image`, `error_front_8x8.image`, `checkmark_front_8x8.image`) + primary count (`2 RUN`, `1 WAIT`, `1 ERR`) + native on-device `time_since` timer (`mm:ss`, RTC-aligned via `GET /api/time`) + gradient bottom pips colored by phase & provider:
+   - **Antigravity (`AGY`)**: Cyan `#00D4FF`
+   - **Claude Code (`CLD`)**: Coral `#FF7A45`
+   - **Codex / ChatGPT (`CDX`)**: Violet `#C084FC`
+   - **Waiting Urgency Escalation**: Unanswered `waiting` sessions warm from amber (`<2m`) → deep orange (`>=2m`) → hot red-magenta (`>=5m`).
 
 ```text
 +------------------------------------------------------------------------+
-| [##]  2 WAIT                                                      1R   |  <- Band 1 (y=1..9): counts / project / reason
+| [##] (*) 2 RUN                                                 02:05   |  <- gradient bar + spinner + timer
 |                                                                        |
-| [################] [################] [################] [############]|  <- Band 2 (y=13..15): per-agent status pips (up to 18)
+| [################>] [################>]                                |  <- status->provider gradient pips
 +------------------------------------------------------------------------+
 ```
 
+2. **Live Spotlight (`spotlight`)** — 2-row live inspector showing `[TAG] [project]` + badge (`SWM 2/4`, `APPR`, or `1/3` pager) on row 1, scrolling live activity (`Edit renderer.mjs`, `Approve Bash: git push`, thinking heading) on row 2, and bright/dimmed pager pips along the bottom.
+
+```text
++------------------------------------------------------------------------+
+| [##] AGY  busy-bar                                           SWM 2/4   |  <- provider tag + project + swarm/pager
+| [##] Edit renderer.mjs                                                 |  <- scrolling live tool / prompt activity
+| [################>] [................]                                 |  <- active pip highlighted
++------------------------------------------------------------------------+
+```
+
+3. **Fleet Pulse (`pulse`)** — Per-provider counts (`AGY:2 CLD:1 CDX:1`) + daily completed count (`4D` or `MUTE` when chimes are muted) over a full-width `72 × 7` proportional segmented gradient bar.
+
 | Phase | Priority | Left Accent & Text | Right Side | LED Blink (Configurable) | Audio Chime (Configurable) |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **`error`** | Highest | Red `#FF2222` · `<N> ERR` | `<M>W` / `<M>R` or project/tag | `#FF0000FF` (red) | `shared/calendar_event_starts.snd` |
-| **`waiting`** | 2nd | Amber `#FFAA00` · `<N> WAIT` | `<M>R` or project / `APPR` / `ASK` / `STUCK` | `#FFAA00FF` (amber) | `shared/calendar_event_starts.snd` |
-| **`running`** | 3rd | Green `#00FF55` · `<N> RUN` | `<M> OK` or active project name (auto-scrolls if long) | Off | None |
-| **`all_done`** | 4th | Teal `#00DDAA` · `ALL DONE` | Centered; stays on until cleared | `#00FFAAFF` (teal) | `shared/volume_change.snd` |
-| **`cleared`** | Lowest | Releases screen (`DELETE /api/display/draw`) back to default BUSY Bar clock/app | — | Off | None |
+| **`error`** | Highest | Red gradient · `<N> ERR` | `<M>W` / `<M>R` or project/tag | `#FF0000FF` (red) | `shared/calendar_event_starts.snd` |
+| **`waiting`** | 2nd | Escalating amber->red · `<N> WAIT` | `<M>R` or live `time_since` wait timer | `#FFAA00FF` (amber) | `shared/calendar_event_starts.snd` |
+| **`running`** | 3rd | Green->cyan gradient + spinner · `<N> RUN` | `<M> OK` or live `time_since` turn timer | Off | None |
+| **`all_done`** | 4th | Teal gradient + checkmark · `ALL DONE` | `x<N>` count; stays on until cleared | `#00FFAAFF` (teal) | `shared/volume_change.snd` |
+| **`cleared`** | Lowest | Releases screen (`DELETE /api/display/draw`) unless `pulse` is pinned | — | Off | None |
 
 ---
 
 ## Features
 
-- **Real-Time Antigravity Telemetry**: Watches `~/.gemini/*/brain/` transcripts (`transcript.jsonl`), swarm state (`members.json`, `board.jsonl`, `view.json`), and `~/.gemini/config/projects/*.json` via `fs.watch` + fast polling. Classifies approvals, `ask_question` prompts, model/quota errors, stuck sessions (>10 min), active runs/swarms (deduplicating worker conversations into their coordinator), and completions.
-- **Stay On Until Cleared**: `ALL DONE` remains latched on the screen until you acknowledge it via `busy-bar clear`, `POST /clear`, or a physical button reset.
-- **Physical Button Reset (`/api/status/ws`)**: Streams hardware button events over WebSocket using a zero-dependency protobuf decoder (`BSB_State.State`). Pressing the small orange **`BACK`** button (configurable to `ok` or `start`) immediately dismisses stuck or manually canceled sessions until they receive new activity.
-- **Independent Alert Controls**: Enable or disable LED blinking (`led_notification_color`) and speaker chimes (`/api/audio/play`) separately via config file, environment variables, CLI flags, or live HTTP `POST /alerts`, with per-event toggles and cooldown throttling.
-- **Clean Canvas Redraws**: Clears the app's Canvas layer (`DELETE /api/display/draw?application_name=...`) before replacing an active frame so removed elements and scrolling labels never leave ghost pixels across state transitions.
-- **USB Disconnect Resilience**: Automatically detects disconnects and re-pushes the current fleet state as soon as the BUSY Bar comes back online.
+- **Real-Time Multi-Agent Telemetry**: Watches `~/.gemini/*/brain/` transcripts (`transcript.jsonl`) and swarms (`members.json`, `board.jsonl`, `view.json`), plus Claude Code & Codex hooks with exact `tool_input` targets (`Edit foo.mjs`, `Run npm test`) and per-turn elapsed timers (`turnStartedAtMs`).
+- **Auto-Rotating View Carousel & Live Timers**: Cycles `fleet` ↔ active `spotlight` sessions automatically on the `72 × 16` front RGB matrix while aligning hardware `CountdownElement` (`time_since`) timers to the BUSY Bar's RTC (`GET /api/time`).
+- **Stay On Until Cleared + Daily Stats**: `ALL DONE` remains latched until cleared; completed/error tallies persist per local calendar day in `state.json`.
+- **Multi-Button Hardware Controls (`/api/status/ws`)**: Zero-dependency `BSB_State.State` protobuf decoder distinguishes `short_press` and `long_press` (`>= 700ms`) across **`OK`**, **`BACK`**, and **`START`** with crisp bordered confirmation toasts (`CHIME OFF`, `BLINK ON`, `DISMISSED`, `AUTO MODE`).
+- **Independent Alert Controls**: Enable or disable LED blinking (`led_notification_color`) and speaker chimes (`/api/audio/play`) via config file, env vars, CLI flags, HTTP `POST /alerts`, or the `START` button.
+- **Flicker-Free Smart Redraws & USB Resilience**: Only clears prior canvas elements when switching views, phases, or removing IDs so animations and timers stay smooth, and automatically re-syncs after USB reconnects.
 - **Extensible Provider Architecture**: Push events from any CLI hook (`busy-bar emit` or `POST /hooks/:provider`), register native payload adapters (`registerHookAdapter`), or load custom ESM provider modules (`providers.customModules`).
 
 ---
@@ -103,34 +121,44 @@ node ./bin/busy-bar.mjs install-hooks all --uninstall
 
 ---
 
-## Physical Controls & Reset Semantics
+## Physical Controls & Multi-Button Gestures
 
-Three complementary ways to clear or reset the bar:
+With `controls.multiButton: true` (default), all three physical BUSY Bar buttons work interactively via WebSocket (`/api/status/ws`):
 
-| Action | CLI / Endpoint / Hardware | Effect |
+| Button | Short Press | Long Press (`>= 700ms`) |
 | :--- | :--- | :--- |
+| **`OK`** | Cycle `fleet` → `spotlight[0..N-1]` → `pulse` → `auto` | Snap back to `auto` carousel (`AUTO MODE` toast) |
+| **`BACK`** | Dismiss only the spotlighted session (when viewing `spotlight` with `>1` sessions, `DISMISSED` toast), or full reset in `fleet`/`pulse` | Always full fleet reset |
+| **`START`** | Toggle speaker chimes on/off (`CHIME ON` / `CHIME OFF` toast) | Toggle LED blink on/off (`BLINK ON` / `BLINK OFF` toast) |
+
+CLI and HTTP reset/dismiss controls:
+
+| Action | CLI / Endpoint | Effect |
+| :--- | :--- | :--- |
+| **Switch view** | `busy-bar view [auto\|fleet\|spotlight\|pulse\|next] [--index <n>]` / `POST /view` | Pin a display view or return to auto-rotation. |
 | **Clear done** | `busy-bar clear` / `POST /clear` | Clears `done` completions (`clearedAtMs = now`), leaving active `running` / `waiting` / `error` sessions visible. |
 | **Dismiss one** | `busy-bar dismiss --session <id>` / `POST /dismiss` | Suppresses one specific session until its `updatedAtMs` advances. |
-| **Full reset** | Orange **`BACK`** button (default) / `busy-bar reset` / `POST /reset` | Dismisses **all** currently visible sessions (including manually stopped/stuck `running` prompts) until they receive new activity, and releases the screen. |
+| **Full reset** | `busy-bar reset` / `POST /reset` | Dismisses **all** currently visible sessions until they receive new activity, resets view to `auto`, and releases the screen. |
 
 Button listener notes:
-- Pressing `BACK` when the BUSY Bar display is already idle (`cleared`) is a no-op so navigating the BUSY Bar's own built-in menus works normally.
-- Change the trigger button via `--reset-button <back|ok|start|none>`, `BUSY_BAR_RESET_BUTTON`, or `controls.resetButton` in config.
-- Test live hardware button events directly in your terminal with `node ./bin/busy-bar.mjs watch-buttons`.
+- Pressing `OK`, `BACK`, or `START` while the BUSY Bar display is idle (`cleared`) is a clean no-op so navigating the BUSY Bar's own built-in menus and timer works normally.
+- Set `--no-multi-button` (or `controls.multiButton: false`) to restore legacy single-button reset behavior (`--reset-button <back|ok|start|none>`).
+- Test live raw button events and `short_press`/`long_press` gestures in your terminal with `node ./bin/busy-bar.mjs watch-buttons`.
 
 ---
 
 ## CLI Reference
 
 ```text
-busy-bar daemon [--config <path>] [--no-blink] [--no-chime] [--no-buttons] [--reset-button <back|ok|start|none>] [--port <n>] [--url <url>] [--token <token>]
+busy-bar daemon [--config <path>] [--no-blink] [--no-chime] [--no-buttons] [--no-multi-button] [--no-carousel] [--no-animations] [--no-timers] [--reset-button <back|ok|start|none>] [--port <n>] [--url <url>] [--token <token>]
 busy-bar status [--once]
+busy-bar view [auto|fleet|spotlight|pulse|next] [--index <n>]
 busy-bar clear
 busy-bar reset
 busy-bar dismiss --session <id> [--provider <name>]
 busy-bar sync-once [--no-blink]
 busy-bar emit --provider <name> --session <id> --status <running|waiting|error|done|idle> [options]
-busy-bar test-screen [running|waiting|error|all_done|mixed] [--dry-run] [--no-blink]
+busy-bar test-screen [running|waiting|error|all_done|mixed|swarm] [--view <fleet|spotlight|pulse>] [--dry-run] [--no-blink] [--no-animations] [--no-timers]
 busy-bar test-chime [waiting|error|all_done]
 busy-bar sounds
 busy-bar alerts [--blink on|off] [--chime on|off]
@@ -150,7 +178,11 @@ busy-bar install-hook [--dry-run] [--uninstall]
 | `--no-blink` / `--blink` | Disable or enable LED notification blinking |
 | `--no-chime` / `--chime` | Disable or enable audio chimes |
 | `--no-buttons` / `--buttons` | Disable or enable the WebSocket hardware button watcher |
-| `--reset-button <key>` | Button that triggers reset: `back` (default), `ok`, `start`, or `none` |
+| `--no-multi-button` | Restore legacy single-button reset mode instead of multi-button gestures |
+| `--no-carousel` | Keep front display pinned on `fleet` instead of rotating with `spotlight` |
+| `--no-animations` | Disable stock status icons/spinner on the front screen |
+| `--no-timers` | Show scrolling project name instead of live hardware `CountdownElement` timers |
+| `--reset-button <key>` | Legacy reset button when multi-button mode is off: `back` (default), `ok`, `start`, or `none` |
 | `--attention <kind>` | For `emit`: `approval`, `question`, `error`, `quota`, or `stuck` |
 | `--project`, `--title`, `--activity`, `--ttl` | Optional metadata and TTL (ms) for `emit` |
 
@@ -163,7 +195,8 @@ While running, the daemon exposes a loopback-only HTTP server at `http://127.0.0
 | Method & Path | Description |
 | :--- | :--- |
 | `GET /health` | Liveness + device connection state, current `phase`, and `uptimeSec` |
-| `GET /status` | Full snapshot, provider health, alert config, input watcher status, and last draw result |
+| `GET /status` | Full snapshot, active `view`, `dailyStats`, provider health, alert config, input watcher status, and last draw result |
+| `POST /view` | Switch front view (`{"mode":"auto"\|"fleet"\|"spotlight"\|"pulse"\|"next","index":0}`) |
 | `POST /clear` | Clears `done` sessions and persists `clearedAtMs` |
 | `POST /reset` | Dismisses all currently visible sessions until new activity and clears the display |
 | `POST /dismiss` | Dismisses a single session (`{"provider":"antigravity","sessionId":"<id>"}`) |
@@ -214,7 +247,20 @@ Copy [`config.example.json`](./config.example.json) to `~/.config/busy-bar/confi
     "stayOnUntilCleared": true,
     "clearBehavior": "release",
     "clearOnShutdown": true,
-    "showProjectName": true
+    "showProjectName": true,
+    "animations": true,
+    "showTimers": true,
+    "providerColors": true,
+    "carousel": {
+      "enabled": true,
+      "intervalMs": 5000,
+      "modes": ["fleet", "spotlight"]
+    },
+    "urgencyEscalation": {
+      "enabled": true,
+      "elevatedAfterMs": 120000,
+      "criticalAfterMs": 300000
+    }
   },
   "alerts": {
     "blink": {
@@ -259,6 +305,8 @@ Copy [`config.example.json`](./config.example.json) to `~/.config/busy-bar/confi
   },
   "controls": {
     "wsInputEnabled": true,
+    "multiButton": true,
+    "longPressMs": 700,
     "resetButton": "back",
     "resetAction": "press",
     "reconnectDelayMs": 3000,
@@ -278,6 +326,10 @@ Copy [`config.example.json`](./config.example.json) to `~/.config/busy-bar/confi
 | `BUSY_BAR_BLINK` | `true` / `false` |
 | `BUSY_BAR_CHIME` | `true` / `false` |
 | `BUSY_BAR_WS_INPUT` | `true` / `false` |
+| `BUSY_BAR_MULTI_BUTTON` | `true` / `false` |
+| `BUSY_BAR_CAROUSEL` | `true` / `false` |
+| `BUSY_BAR_ANIMATIONS` | `true` / `false` |
+| `BUSY_BAR_TIMERS` | `true` / `false` |
 | `BUSY_BAR_RESET_BUTTON` | `back`, `ok`, or `start` |
 
 ---

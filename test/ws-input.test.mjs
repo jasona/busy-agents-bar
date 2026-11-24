@@ -119,3 +119,69 @@ test('BusyBarInputWatcher sends enable, triggers debounced onReset for configure
   watcher.stop();
   assert.equal(sockets[1].closed, true);
 });
+
+test('BusyBarInputWatcher distinguishes short_press vs long_press and clears timers on stop/close', async () => {
+  const sockets = [];
+  class FakeWebSocket {
+    constructor(url) {
+      this.url = url;
+      this.closed = false;
+      this._listeners = new Map();
+      sockets.push(this);
+    }
+    addEventListener(type, fn) {
+      if (!this._listeners.has(type)) this._listeners.set(type, []);
+      this._listeners.get(type).push(fn);
+    }
+    emit(type, ev = {}) {
+      for (const fn of this._listeners.get(type) || []) fn(ev);
+    }
+    send() {}
+    close() {
+      this.closed = true;
+    }
+  }
+
+  let clock = 50_000;
+  const gestures = [];
+  const watcher = new BusyBarInputWatcher({
+    baseUrl: 'http://10.0.4.20',
+    multiButton: true,
+    longPressMs: 40,
+    reconnectDelayMs: 500,
+    WebSocketImpl: FakeWebSocket,
+    nowFn: () => clock,
+    onGesture: (g) => gestures.push(g),
+  });
+
+  watcher.start();
+  sockets[0].emit('open');
+  assert.equal(watcher.getStatus().multiButton, true);
+
+  // Quick release -> short_press
+  await watcher._handleMessage(encodeButtonStateForTest([{ button: 'ok', action: 'press' }]));
+  clock += 15;
+  await watcher._handleMessage(encodeButtonStateForTest([{ button: 'ok', action: 'release' }]));
+  await new Promise((r) => setTimeout(r, 60));
+  assert.deepEqual(gestures, [{ button: 'ok', gesture: 'short_press', durationMs: 15 }]);
+
+  // Held past longPressMs -> long_press only once; trailing release is ignored
+  await watcher._handleMessage(encodeButtonStateForTest([{ button: 'start', action: 'press' }]));
+  await new Promise((r) => setTimeout(r, 65));
+  await watcher._handleMessage(encodeButtonStateForTest([{ button: 'start', action: 'release' }]));
+  assert.equal(gestures.length, 2);
+  assert.equal(gestures[1].button, 'start');
+  assert.equal(gestures[1].gesture, 'long_press');
+
+  // Unpaired release is ignored
+  await watcher._handleMessage(encodeButtonStateForTest([{ button: 'back', action: 'release' }]));
+  assert.equal(gestures.length, 2);
+
+  // WebSocket close cancels pending long_press timer cleanly
+  await watcher._handleMessage(encodeButtonStateForTest([{ button: 'back', action: 'press' }]));
+  sockets[0].emit('close');
+  await new Promise((r) => setTimeout(r, 60));
+  assert.equal(gestures.length, 2);
+
+  watcher.stop();
+});

@@ -231,6 +231,8 @@ export class AntigravityProvider {
         activity,
         updatedAtMs,
         startedAtMs: tr?.startedAtMs || updatedAtMs,
+        turnStartedAtMs: tr?.turnStartedAtMs || tr?.startedAtMs || updatedAtMs,
+        steps: tr?.steps || 0,
         isSwarm: Boolean(swarm),
         swarmWorkingCount: swarm?.workingCount || 0,
         swarmTotalCount: swarm?.count || 0,

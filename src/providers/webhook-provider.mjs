@@ -85,9 +85,31 @@ export class HookProvider {
     });
 
     const key = `${session.provider}:${session.id}`;
-    const prev = this._entries.get(key);
-    const startedAtMs = prev?.session?.startedAtMs || session.startedAtMs || now;
-    const finalSession = { ...session, startedAtMs };
+    const prev = this._entries.get(key)?.session;
+    const startedAtMs = prev?.startedAtMs || session.startedAtMs || now;
+
+    const prevTerminal = !prev || prev.status === 'done' || prev.status === 'idle';
+    const hasExplicitTurnStart =
+      Number(payload?.turnStartedAtMs ?? payload?.startedAtMs) > 0;
+    const hasExplicitSteps = payload?.steps !== undefined && payload?.steps !== null;
+
+    let turnStartedAtMs;
+    let steps;
+    if (prevTerminal && session.status === 'running') {
+      turnStartedAtMs = hasExplicitTurnStart ? session.turnStartedAtMs : now;
+      steps = hasExplicitSteps ? session.steps : session.activity ? 1 : 0;
+    } else {
+      turnStartedAtMs = hasExplicitTurnStart
+        ? session.turnStartedAtMs
+        : prev?.turnStartedAtMs || startedAtMs;
+      const isActiveStep =
+        session.status === 'running' || session.status === 'waiting' || session.status === 'error';
+      steps = hasExplicitSteps
+        ? session.steps
+        : (prev?.steps || 0) + (isActiveStep ? 1 : 0);
+    }
+
+    const finalSession = { ...session, startedAtMs, turnStartedAtMs, steps };
 
     this._entries.set(key, {
       session: finalSession,

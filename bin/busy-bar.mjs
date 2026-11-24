@@ -83,6 +83,32 @@ function buildConfigOverrides(flags) {
   } else if (flags.buttons === true) {
     overrides.controls = { ...(overrides.controls || {}), wsInputEnabled: true };
   }
+  if (flags['multi-button'] === false) {
+    overrides.controls = { ...(overrides.controls || {}), multiButton: false };
+  } else if (flags['multi-button'] === true) {
+    overrides.controls = { ...(overrides.controls || {}), multiButton: true };
+  }
+  if (flags.carousel === false) {
+    overrides.display = {
+      ...(overrides.display || {}),
+      carousel: { ...(overrides.display?.carousel || {}), enabled: false },
+    };
+  } else if (flags.carousel === true) {
+    overrides.display = {
+      ...(overrides.display || {}),
+      carousel: { ...(overrides.display?.carousel || {}), enabled: true },
+    };
+  }
+  if (flags.animations === false) {
+    overrides.display = { ...(overrides.display || {}), animations: false };
+  } else if (flags.animations === true) {
+    overrides.display = { ...(overrides.display || {}), animations: true };
+  }
+  if (flags.timers === false) {
+    overrides.display = { ...(overrides.display || {}), showTimers: false };
+  } else if (flags.timers === true) {
+    overrides.display = { ...(overrides.display || {}), showTimers: true };
+  }
   if (typeof flags['reset-button'] === 'string' && flags['reset-button'].trim()) {
     const btn = flags['reset-button'].trim().toLowerCase();
     if (!['back', 'ok', 'start', 'none'].includes(btn)) {
@@ -127,31 +153,150 @@ function makeScenarioSessions(scenario, now = Date.now()) {
   switch (scenario) {
     case 'running':
       return [
-        { id: 'run-1', provider: 'antigravity', project: 'busy-bar', title: 'Build daemon', status: 'running', updatedAtMs: now },
-        { id: 'run-2', provider: 'antigravity', project: 'api', title: 'Add tests', status: 'running', updatedAtMs: now - 5000 },
+        {
+          id: 'run-1',
+          provider: 'antigravity',
+          project: 'busy-bar',
+          title: 'Build daemon',
+          activity: 'Edit renderer.mjs',
+          status: 'running',
+          turnStartedAtMs: now - 125_000,
+          updatedAtMs: now,
+        },
+        {
+          id: 'run-2',
+          provider: 'claude-code',
+          project: 'api',
+          title: 'Add tests',
+          activity: 'Run npm test',
+          status: 'running',
+          turnStartedAtMs: now - 45_000,
+          updatedAtMs: now - 5_000,
+        },
       ];
     case 'waiting':
       return [
-        { id: 'wait-1', provider: 'antigravity', project: 'busy-bar', title: 'Approve command', status: 'waiting', attentionKind: 'approval', updatedAtMs: now },
-        { id: 'run-1', provider: 'antigravity', project: 'web', title: 'Lint check', status: 'running', updatedAtMs: now - 2000 },
+        {
+          id: 'wait-1',
+          provider: 'claude-code',
+          project: 'busy-bar',
+          title: 'Approve command',
+          activity: 'Approve Bash: npm publish --dry-run',
+          status: 'waiting',
+          attentionKind: 'approval',
+          turnStartedAtMs: now - 180_000,
+          updatedAtMs: now - 90_000,
+        },
+        {
+          id: 'run-1',
+          provider: 'codex',
+          project: 'web',
+          title: 'Lint check',
+          activity: 'Run eslint src/',
+          status: 'running',
+          turnStartedAtMs: now - 40_000,
+          updatedAtMs: now - 2_000,
+        },
       ];
     case 'error':
       return [
-        { id: 'err-1', provider: 'antigravity', project: 'api', title: 'Build failed', status: 'error', attentionKind: 'error', updatedAtMs: now },
-        { id: 'wait-1', provider: 'antigravity', project: 'busy-bar', title: 'Question', status: 'waiting', attentionKind: 'question', updatedAtMs: now - 3000 },
+        {
+          id: 'err-1',
+          provider: 'antigravity',
+          project: 'api',
+          title: 'Build failed',
+          activity: 'TypeError: Cannot read properties of undefined',
+          status: 'error',
+          attentionKind: 'error',
+          turnStartedAtMs: now - 60_000,
+          updatedAtMs: now,
+        },
+        {
+          id: 'wait-1',
+          provider: 'claude-code',
+          project: 'busy-bar',
+          title: 'Question',
+          activity: 'Pick database migration strategy',
+          status: 'waiting',
+          attentionKind: 'question',
+          updatedAtMs: now - 3_000,
+        },
+      ];
+    case 'swarm':
+      return [
+        {
+          id: 'swm-1',
+          provider: 'antigravity',
+          project: 'busy-bar',
+          title: 'Feature Swarm',
+          activity: 'Swarm 3/4',
+          status: 'running',
+          isSwarm: true,
+          swarmWorkingCount: 3,
+          swarmTotalCount: 4,
+          turnStartedAtMs: now - 210_000,
+          updatedAtMs: now,
+        },
+        {
+          id: 'cx-1',
+          provider: 'codex',
+          project: 'docs',
+          title: 'Update README',
+          activity: 'apply_patch README.md',
+          status: 'running',
+          turnStartedAtMs: now - 35_000,
+          updatedAtMs: now - 2_000,
+        },
       ];
     case 'all_done':
       return [
-        { id: 'done-1', provider: 'antigravity', project: 'busy-bar', title: 'Finished', status: 'done', updatedAtMs: now },
-        { id: 'done-2', provider: 'antigravity', project: 'api', title: 'Tests passed', status: 'done', updatedAtMs: now - 1000 },
+        { id: 'done-1', provider: 'antigravity', project: 'busy-bar', title: 'Finished', activity: 'Done', status: 'done', updatedAtMs: now },
+        { id: 'done-2', provider: 'claude-code', project: 'api', title: 'Tests passed', activity: 'Done', status: 'done', updatedAtMs: now - 1_000 },
       ];
     case 'mixed':
     default:
       return [
-        { id: 'err-1', provider: 'antigravity', project: 'api', title: 'Quota error', status: 'error', attentionKind: 'quota', updatedAtMs: now },
-        { id: 'wait-1', provider: 'antigravity', project: 'busy-bar', title: 'Needs approval', status: 'waiting', attentionKind: 'approval', updatedAtMs: now - 1000 },
-        { id: 'run-1', provider: 'antigravity', project: 'web', title: 'Running tests', status: 'running', updatedAtMs: now - 2000 },
-        { id: 'done-1', provider: 'antigravity', project: 'cli', title: 'Completed', status: 'done', updatedAtMs: now - 3000 },
+        {
+          id: 'err-1',
+          provider: 'antigravity',
+          project: 'api',
+          title: 'Quota error',
+          activity: 'RESOURCE_EXHAUSTED 429',
+          status: 'error',
+          attentionKind: 'quota',
+          turnStartedAtMs: now - 95_000,
+          updatedAtMs: now,
+        },
+        {
+          id: 'wait-1',
+          provider: 'claude-code',
+          project: 'busy-bar',
+          title: 'Needs approval',
+          activity: 'Approve Bash: git push',
+          status: 'waiting',
+          attentionKind: 'approval',
+          turnStartedAtMs: now - 70_000,
+          updatedAtMs: now - 1_000,
+        },
+        {
+          id: 'run-1',
+          provider: 'codex',
+          project: 'web',
+          title: 'Running tests',
+          activity: 'Run pytest tests/',
+          status: 'running',
+          turnStartedAtMs: now - 30_000,
+          updatedAtMs: now - 2_000,
+        },
+        {
+          id: 'done-1',
+          provider: 'antigravity',
+          project: 'cli',
+          title: 'Completed',
+          activity: 'Done',
+          status: 'done',
+          updatedAtMs: now - 3_000,
+        },
       ];
   }
 }
@@ -160,14 +305,15 @@ function printHelp() {
   console.log(`busy-bar - Real-time agent status display daemon for BUSY Bar
 
 Usage:
-  busy-bar daemon [--config <path>] [--no-blink] [--no-chime] [--no-buttons] [--reset-button <back|ok|start>] [--port <n>] [--url <url>] [--token <token>]
+  busy-bar daemon [--config <path>] [--no-blink] [--no-chime] [--no-buttons] [--no-multi-button] [--no-carousel] [--no-animations] [--no-timers] [--reset-button <back|ok|start>] [--port <n>] [--url <url>] [--token <token>]
   busy-bar status [--once]
+  busy-bar view [auto|fleet|spotlight|pulse|next] [--index <n>]
   busy-bar clear
   busy-bar reset
   busy-bar dismiss --session <id> [--provider <name>]
   busy-bar sync-once [--no-blink]
   busy-bar emit --provider <name> --session <id> --status <running|waiting|error|done|idle> [options]
-  busy-bar test-screen [running|waiting|error|all_done|mixed] [--dry-run] [--no-blink]
+  busy-bar test-screen [running|waiting|error|all_done|mixed|swarm] [--view <fleet|spotlight|pulse>] [--dry-run] [--no-blink] [--no-animations] [--no-timers]
   busy-bar test-chime [waiting|error|all_done]
   busy-bar sounds
   busy-bar alerts [--blink on|off] [--chime on|off]
@@ -273,6 +419,17 @@ async function cmdDismiss(config, flags) {
   console.log(JSON.stringify(res, null, 2));
 }
 
+async function readDeviceClockOffsetMs(client, now) {
+  try {
+    const t = await client.getTime();
+    const parsed = t?.timestamp ? Date.parse(String(t.timestamp)) : NaN;
+    if (Number.isFinite(parsed)) return parsed - now;
+  } catch {
+    // Fallback to host clock if /api/time is unavailable.
+  }
+  return 0;
+}
+
 async function cmdSyncOnce(config) {
   const now = Date.now();
   const client = new BusyBarClient(config.device);
@@ -295,7 +452,8 @@ async function cmdSyncOnce(config) {
     return;
   }
 
-  const payload = renderFrontDisplay(snapshot, { config, blinkColor });
+  const deviceClockOffsetMs = await readDeviceClockOffsetMs(client, now);
+  const payload = renderFrontDisplay(snapshot, { config, blinkColor, deviceClockOffsetMs, now });
   await client.clearDisplay(config.device.applicationName).catch(() => {});
   const res = await client.draw(payload);
   console.log(renderAsciiPreview(snapshot, payload));
@@ -327,8 +485,26 @@ async function cmdEmit(config, flags) {
   console.log(JSON.stringify(res, null, 2));
 }
 
+async function cmdView(config, args, flags) {
+  const mode = String(args[0] || flags.mode || 'next').trim().toLowerCase();
+  const body = { mode };
+  if (flags.index !== undefined && flags.index !== true) {
+    const idx = Number(flags.index);
+    if (!Number.isInteger(idx) || idx < 0) {
+      throw new Error(`Invalid --index value "${flags.index}"`);
+    }
+    body.index = idx;
+  }
+  const res = await fetchDaemonJson(`${controlUrlOf(config)}/view`, 'POST', body);
+  console.log(JSON.stringify(res, null, 2));
+}
+
 async function cmdTestScreen(config, args, flags) {
   const scenario = args[0] || 'mixed';
+  const viewMode = String(flags.view || 'fleet').trim().toLowerCase();
+  if (!['fleet', 'spotlight', 'pulse'].includes(viewMode)) {
+    throw new Error(`Invalid --view "${viewMode}" (expected fleet|spotlight|pulse)`);
+  }
   const now = Date.now();
   const sessions = makeScenarioSessions(scenario, now);
   const snapshot = buildFleetSnapshot(sessions, {
@@ -338,14 +514,31 @@ async function cmdTestScreen(config, args, flags) {
   });
   const alerts = new AlertManager(config.alerts);
   const blinkColor = alerts.resolveBlinkColor(snapshot);
-  const payload = renderFrontDisplay(snapshot, { config, blinkColor });
 
-  console.log(renderAsciiPreview(snapshot, payload));
+  let deviceClockOffsetMs = 0;
+  let client = null;
+  if (!flags['dry-run']) {
+    client = new BusyBarClient(config.device);
+    deviceClockOffsetMs = await readDeviceClockOffsetMs(client, now);
+  }
+
+  const spotlightIndex = flags.index !== undefined ? Number(flags.index) || 0 : 0;
+  const payload = renderFrontDisplay(snapshot, {
+    config,
+    blinkColor,
+    viewMode,
+    spotlightIndex,
+    dailyStats: { date: 'today', completed: 4, errors: 1 },
+    muted: !alerts.getConfig().chime?.enabled,
+    deviceClockOffsetMs,
+    now,
+  });
+
+  console.log(renderAsciiPreview(snapshot, payload, viewMode));
   console.log(JSON.stringify(payload, null, 2));
 
   if (flags['dry-run']) return;
 
-  const client = new BusyBarClient(config.device);
   await client.clearDisplay(config.device.applicationName).catch(() => {});
   const res = await client.draw(payload);
   console.log(JSON.stringify({ result: res }, null, 2));
@@ -434,17 +627,25 @@ function cmdInstallService(flags) {
 }
 
 function cmdWatchButtons(config) {
+  const multiButton = config.controls?.multiButton !== false;
   const watcher = new BusyBarInputWatcher({
     baseUrl: config.device.baseUrl,
     enabled: true,
+    multiButton,
+    longPressMs: config.controls?.longPressMs ?? 700,
     resetButton: config.controls?.resetButton ?? 'back',
     resetAction: config.controls?.resetAction ?? 'press',
     onButton: (evt) => {
-      console.log(`[${new Date().toISOString()}] button=${evt.button} action=${evt.action}`);
+      console.log(`[${new Date().toISOString()}] raw button=${evt.button} action=${evt.action}`);
     },
+    onGesture: multiButton
+      ? (g) => {
+          console.log(`[${new Date().toISOString()}] gesture=${g.gesture} button=${g.button} duration=${g.durationMs}ms`);
+        }
+      : null,
   });
   console.log(
-    `Watching BUSY Bar buttons on ${watcher.wsUrl} (reset trigger: ${config.controls?.resetButton ?? 'none'} ${config.controls?.resetAction ?? 'press'}). Press Ctrl+C to stop.`
+    `Watching BUSY Bar buttons on ${watcher.wsUrl} (multiButton=${multiButton}, longPress=${config.controls?.longPressMs ?? 700}ms). Press Ctrl+C to stop.`
   );
   watcher.start();
 
@@ -570,6 +771,9 @@ async function main() {
       break;
     case 'status':
       await cmdStatus(config, flags);
+      break;
+    case 'view':
+      await cmdView(config, args, flags);
       break;
     case 'clear':
       await cmdClear(config);

@@ -112,3 +112,19 @@ test('ProviderRegistry dynamically loads custom ESM provider modules', async () 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('HookProvider tracks turnStartedAtMs and step counts across turns', () => {
+  const hooks = new HookProvider();
+  const s1 = hooks.ingest('generic', { sessionId: 'h1', status: 'running', activity: 'Read a.mjs' }, 1000);
+  assert.equal(s1.turnStartedAtMs, 1000);
+  assert.equal(s1.steps, 1);
+
+  const s2 = hooks.ingest('generic', { sessionId: 'h1', status: 'running', activity: 'Edit a.mjs' }, 2500);
+  assert.equal(s2.turnStartedAtMs, 1000);
+  assert.equal(s2.steps, 2);
+
+  hooks.ingest('generic', { sessionId: 'h1', status: 'done', activity: 'Done' }, 3000);
+  const s3 = hooks.ingest('generic', { sessionId: 'h1', status: 'running', activity: 'Run npm test' }, 9000);
+  assert.equal(s3.turnStartedAtMs, 9000);
+  assert.equal(s3.steps, 1);
+});
