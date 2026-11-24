@@ -170,6 +170,19 @@ export function createControlServer({ daemon, hookProvider, host = '127.0.0.1', 
         return jsonReply(res, 200, { ok: true, alerts, snapshot: daemon.getStatus().snapshot });
       }
 
+      if (pathname === '/view') {
+        if (method !== 'POST') return jsonReply(res, 405, { ok: false, error: 'Method not allowed' });
+        const body = await parseJsonRequest(req, res);
+        if (!body) return;
+        try {
+          const mode = typeof body.mode === 'string' ? body.mode : 'next';
+          const snapshot = await daemon.setView({ mode, index: body.index });
+          return jsonReply(res, 200, { ok: true, view: daemon.getStatus().view, snapshot });
+        } catch (err) {
+          return jsonReply(res, 400, { ok: false, error: err?.message || 'Invalid view parameters' });
+        }
+      }
+
       const hookMatch = pathname.match(/^\/hooks\/([a-zA-Z0-9._-]+)(?:\/([^/]+))?$/);
       if (hookMatch) {
         const providerName = decodeURIComponent(hookMatch[1]);

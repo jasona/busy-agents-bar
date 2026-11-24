@@ -1,4 +1,4 @@
-import { assertHookObject, deriveProject, genericHookAdapter } from './generic.mjs';
+import { assertHookObject, deriveProject, describeHookToolActivity, genericHookAdapter } from './generic.mjs';
 
 const CANONICAL_PROVIDER = 'codex';
 
@@ -64,7 +64,7 @@ export function codexHookAdapter(providerName, payload, now = Date.now()) {
           title: `Codex (${project})`,
           status: 'running',
           attentionKind: null,
-          activity: toolName ? `Tool: ${toolName}` : 'Working',
+          activity: describeHookToolActivity(toolName, payload.tool_input),
           updatedAtMs: now,
         },
       };
@@ -79,7 +79,7 @@ export function codexHookAdapter(providerName, payload, now = Date.now()) {
           title: `Codex (${project})`,
           status: 'waiting',
           attentionKind: 'approval',
-          activity: toolName ? `Approve ${toolName}` : 'Approval required',
+          activity: describeHookToolActivity(toolName, payload.tool_input, { approval: true }),
           updatedAtMs: now,
         },
       };

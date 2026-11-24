@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildFleetSnapshot, detectTransitions, normalizeSession } from '../src/model.mjs';
+import { buildFleetSnapshot, countNewCompletions, detectTransitions, normalizeSession } from '../src/model.mjs';
 
 const NOW = 1_700_000_000_000;
 
@@ -136,4 +136,28 @@ test('detectTransitions skips startup snapshot and detects new error, waiting, a
 
   // Repeated all_done poll does not re-emit transition.
   assert.deepEqual(detectTransitions(snapDone, snapDone), []);
+});
+
+test('countNewCompletions, turnStartedAtMs, and activity fingerprint sensitivity behave properly', () => {
+  const s1 = normalizeSession({
+    id: 'a1',
+    provider: 'claude-code',
+    status: 'running',
+    activity: 'Edit foo.mjs',
+    steps: 4,
+    startedAtMs: NOW - 5000,
+    turnStartedAtMs: NOW - 1000,
+    updatedAtMs: NOW,
+  });
+  assert.equal(s1.turnStartedAtMs, NOW - 1000);
+  assert.equal(s1.steps, 4);
+
+  const snapA = buildFleetSnapshot([s1], { now: NOW });
+  const snapB = buildFleetSnapshot([{ ...s1, activity: 'Run npm test' }], { now: NOW + 500 });
+  assert.notEqual(snapA.fingerprint, snapB.fingerprint);
+
+  const snapDone1 = buildFleetSnapshot([{ ...s1, status: 'done', updatedAtMs: NOW + 1000 }], { now: NOW + 1000 });
+  assert.equal(countNewCompletions(null, snapDone1), 0);
+  assert.equal(countNewCompletions(snapB, snapDone1), 1);
+  assert.equal(countNewCompletions(snapDone1, snapDone1), 0);
 });

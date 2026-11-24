@@ -37,6 +37,45 @@ test('claudeCodeHookAdapter maps all Claude Code lifecycle events and ignores no
   assert.equal(tool.session.status, 'running');
   assert.equal(tool.session.activity, 'Tool: Bash');
 
+  const toolInputBash = claudeCodeHookAdapter(
+    'claude-code',
+    {
+      session_id: 'c1',
+      hook_event_name: 'PreToolUse',
+      tool_name: 'Bash',
+      tool_input: { command: 'npm run test:unit' },
+      cwd: '/work/my-repo',
+    },
+    NOW
+  );
+  assert.equal(toolInputBash.session.activity, 'Run npm run test:unit');
+
+  const toolInputEdit = claudeCodeHookAdapter(
+    'claude-code',
+    {
+      session_id: 'c1',
+      hook_event_name: 'PostToolUse',
+      tool_name: 'Edit',
+      tool_input: JSON.stringify({ file_path: '/work/my-repo/src/daemon.mjs' }),
+      cwd: '/work/my-repo',
+    },
+    NOW
+  );
+  assert.equal(toolInputEdit.session.activity, 'Edit daemon.mjs');
+
+  const permWithInput = claudeCodeHookAdapter(
+    'claude-code',
+    {
+      session_id: 'c1',
+      hook_event_name: 'PermissionRequest',
+      tool_name: 'Bash',
+      tool_input: { command: 'rm -rf dist' },
+      cwd: '/work/my-repo',
+    },
+    NOW
+  );
+  assert.equal(permWithInput.session.activity, 'Approve Bash: rm -rf dist');
+
   const postTool = claudeCodeHookAdapter(
     'claude-code',
     { session_id: 'c1', hook_event_name: 'PostToolUse', tool_name: 'Edit', cwd: '/work/my-repo' },
@@ -131,6 +170,19 @@ test('codexHookAdapter maps Codex / ChatGPT lifecycle events, legacy notify, and
   );
   assert.equal(tool.session.status, 'running');
   assert.equal(tool.session.activity, 'Tool: apply_patch');
+
+  const toolSearch = codexHookAdapter(
+    'codex',
+    {
+      session_id: 'x1',
+      hook_event_name: 'PreToolUse',
+      tool_name: 'grep_search',
+      tool_input: { pattern: 'CountdownElement' },
+      cwd: '/work/codex-proj',
+    },
+    NOW
+  );
+  assert.equal(toolSearch.session.activity, 'Search CountdownElement');
 
   const perm = codexHookAdapter(
     'codex',

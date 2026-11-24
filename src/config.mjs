@@ -26,6 +26,19 @@ export const DEFAULT_CONFIG = {
     clearBehavior: 'release',
     clearOnShutdown: true,
     showProjectName: true,
+    animations: true,
+    showTimers: true,
+    providerColors: true,
+    carousel: {
+      enabled: true,
+      intervalMs: 5000,
+      modes: ['fleet', 'spotlight'],
+    },
+    urgencyEscalation: {
+      enabled: true,
+      elevatedAfterMs: 120000,
+      criticalAfterMs: 300000,
+    },
   },
   alerts: {
     blink: {
@@ -70,6 +83,8 @@ export const DEFAULT_CONFIG = {
   },
   controls: {
     wsInputEnabled: true,
+    multiButton: true,
+    longPressMs: 700,
     resetButton: 'back',
     resetAction: 'press',
     reconnectDelayMs: 3000,
@@ -198,6 +213,25 @@ export function loadConfig({ configPath, overrides = {}, env = process.env, home
     if (btn === 'back' || btn === 'ok' || btn === 'start') {
       envOverrides.controls = { ...(envOverrides.controls || {}), resetButton: btn };
     }
+  }
+  const carouselEnv = parseBoolEnv(env.BUSY_BAR_CAROUSEL);
+  if (carouselEnv !== undefined) {
+    envOverrides.display = {
+      ...(envOverrides.display || {}),
+      carousel: { ...(envOverrides.display?.carousel || {}), enabled: carouselEnv },
+    };
+  }
+  const animEnv = parseBoolEnv(env.BUSY_BAR_ANIMATIONS);
+  if (animEnv !== undefined) {
+    envOverrides.display = { ...(envOverrides.display || {}), animations: animEnv };
+  }
+  const timersEnv = parseBoolEnv(env.BUSY_BAR_TIMERS);
+  if (timersEnv !== undefined) {
+    envOverrides.display = { ...(envOverrides.display || {}), showTimers: timersEnv };
+  }
+  const multiBtnEnv = parseBoolEnv(env.BUSY_BAR_MULTI_BUTTON);
+  if (multiBtnEnv !== undefined) {
+    envOverrides.controls = { ...(envOverrides.controls || {}), multiButton: multiBtnEnv };
   }
 
   const merged = deepMerge(DEFAULT_CONFIG, fileConfig, envOverrides, overrides);

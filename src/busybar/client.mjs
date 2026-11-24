@@ -110,6 +110,14 @@ export class BusyBarClient {
     return body;
   }
 
+  async getTime() {
+    const { ok, status, body } = await this._request('GET', '/api/time');
+    if (!ok) {
+      throw new Error(`GET /api/time failed (${status})`);
+    }
+    return body;
+  }
+
   async draw(payload) {
     const { ok, status, body } = await this._request('POST', '/api/display/draw', {
       jsonBody: payload,

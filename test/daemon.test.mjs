@@ -45,6 +45,12 @@ function startMockBusyBar() {
         return;
       }
 
+      if (req.method === 'GET' && url.pathname === '/api/time') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ timestamp: new Date(state.deviceTimeMs || 1_700_000_000_000).toISOString() }));
+        return;
+      }
+
       if (req.method === 'GET' && url.pathname === '/api/status') {
         state.statusCalls++;
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -410,6 +416,185 @@ test('BusyBarClient sends X-API-Token and daemon honors clearOnShutdown true vs 
     await d2.stop();
     assert.equal(mock.state.clearCalls.length, clearsBeforeStop2);
   } finally {
+    await mock.close();
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('BusyBarDaemon carousel rotation, POST /view, button gestures, toasts, and dailyStats persistence', async () => {
+  const mock = await startMockBusyBar();
+  const tmp = mkdtempSync(join(tmpdir(), 'busy-bar-phase1-'));
+  const stateFile = join(tmp, 'state.json');
+
+  let clock = 1_700_000_000_000;
+  mock.state.deviceTimeMs = clock - 60_000;
+
+  let fakeSessions = [
+    {
+      id: 'ag-1',
+      provider: 'antigravity',
+      project: 'busy-bar',
+      activity: 'Edit renderer.mjs',
+      status: 'running',
+      turnStartedAtMs: clock - 15_000,
+      updatedAtMs: clock,
+    },
+    {
+      id: 'cc-1',
+      provider: 'claude-code',
+      project: 'api',
+      activity: 'Run npm test',
+      status: 'running',
+      turnStartedAtMs: clock - 10_000,
+      updatedAtMs: clock - 1_000,
+    },
+  ];
+
+  const registry = new ProviderRegistry();
+  registry.register({
+    id: 'antigravity',
+    label: 'Antigravity',
+    poll: () => fakeSessions,
+  });
+
+  const config = loadConfig({
+    overrides: {
+      device: { baseUrl: mock.url, timeoutMs: 1000 },
+      daemon: { pollIntervalMs: 60000, healthIntervalMs: 60000, controlPort: 0, stateFile },
+      display: { carousel: { enabled: true, intervalMs: 5000, modes: ['fleet', 'spotlight'] } },
+      alerts: { blink: { enabled: true }, chime: { enabled: true, cooldownMs: 0 } },
+      controls: { wsInputEnabled: false, multiButton: true },
+    },
+  });
+
+  const daemon = new BusyBarDaemon({
+    config,
+    client: new BusyBarClient(config.device),
+    registry,
+    nowFn: () => clock,
+  });
+
+  try {
+    await daemon.start({ enableControlServer: true });
+    const controlUrl = daemon.getStatus().controlUrl;
+    assert.equal(daemon.getStatus().view.mode, 'fleet');
+    assert.equal(daemon._deviceClockOffsetMs, -60_000);
+
+    // Carousel advances fleet -> spotlight[0] -> spotlight[1] -> fleet every 5s
+    clock += 5000;
+    await daemon.sync();
+    assert.equal(daemon.getStatus().view.mode, 'spotlight');
+    assert.equal(daemon.getStatus().view.spotlightIndex, 0);
+    assert.equal(mock.state.drawCalls.at(-1).elements.find((e) => e.id === 'provider').text, 'AGY');
+
+    clock += 5000;
+    await daemon.sync();
+    assert.equal(daemon.getStatus().view.mode, 'spotlight');
+    assert.equal(daemon.getStatus().view.spotlightIndex, 1);
+    assert.equal(mock.state.drawCalls.at(-1).elements.find((e) => e.id === 'provider').text, 'CLD');
+
+    clock += 5000;
+    await daemon.sync();
+    assert.equal(daemon.getStatus().view.mode, 'fleet');
+
+    // POST /view pins pulse mode and validates bad mode
+    const badView = await fetch(`${controlUrl}/view`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: 'bogus' }),
+    });
+    assert.equal(badView.status, 400);
+
+    const pulseRes = await fetch(`${controlUrl}/view`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: 'pulse' }),
+    });
+    assert.equal(pulseRes.status, 200);
+    assert.equal(daemon.getStatus().view.mode, 'pulse');
+    assert.equal(daemon.getStatus().view.auto, false);
+
+    // Urgent transition snaps back to immediate fleet alert view
+    clock += 1000;
+    fakeSessions = [
+      fakeSessions[0],
+      {
+        ...fakeSessions[1],
+        status: 'waiting',
+        attentionKind: 'approval',
+        activity: 'Approve Bash: git status',
+        updatedAtMs: clock,
+      },
+    ];
+    await daemon.sync();
+    assert.equal(daemon.getStatus().view.mode, 'fleet');
+    assert.equal(daemon.getStatus().view.auto, true);
+
+    // OK short_press cycles fleet -> spotlight[0] -> spotlight[1] -> pulse -> auto (AUTO MODE toast)
+    await daemon.handleButtonGesture({ button: 'ok', gesture: 'short_press' });
+    assert.equal(daemon.getStatus().view.mode, 'spotlight');
+    assert.equal(daemon.getStatus().view.spotlightIndex, 0);
+
+    await daemon.handleButtonGesture({ button: 'ok', gesture: 'short_press' });
+    assert.equal(daemon.getStatus().view.mode, 'spotlight');
+    assert.equal(daemon.getStatus().view.spotlightIndex, 1);
+
+    // BACK short_press while in spotlight with 2 sessions dismisses ONLY spotlight[1] (ag-1)
+    await daemon.handleButtonGesture({ button: 'back', gesture: 'short_press' });
+    assert.equal(daemon.getStatus().snapshot.counts.total, 1);
+    assert.equal(daemon.getStatus().snapshot.sessions[0].id, 'cc-1');
+    assert.equal(mock.state.drawCalls.at(-1).elements.find((e) => e.id === 'toast_text')?.text, 'DISMISSED');
+    clock += 2000;
+    await daemon.sync();
+
+    // START short_press toggles chime + toast; START long_press toggles blink + toast
+    await daemon.handleButtonGesture({ button: 'start', gesture: 'short_press' });
+    assert.equal(daemon.getStatus().alerts.chime.enabled, false);
+    assert.equal(mock.state.drawCalls.at(-1).elements.find((e) => e.id === 'toast_text')?.text, 'CHIME OFF');
+    clock += 2000;
+    await daemon.sync();
+
+    await daemon.handleButtonGesture({ button: 'start', gesture: 'long_press' });
+    assert.equal(daemon.getStatus().alerts.blink.enabled, false);
+    assert.equal(mock.state.drawCalls.at(-1).elements.find((e) => e.id === 'toast_text')?.text, 'BLINK OFF');
+    clock += 2000;
+    await daemon.sync();
+
+    // Pulse -> OK short_press -> returns to auto mode with AUTO MODE toast
+    await daemon.setView({ mode: 'pulse' });
+    await daemon.handleButtonGesture({ button: 'ok', gesture: 'short_press' });
+    assert.equal(daemon.getStatus().view.auto, true);
+    assert.equal(mock.state.drawCalls.at(-1).elements.find((e) => e.id === 'toast_text')?.text, 'AUTO MODE');
+    clock += 2000;
+    await daemon.sync();
+
+    // Session completion increments dailyStats.completed and persists to disk
+    clock += 1000;
+    fakeSessions = [
+      { ...fakeSessions[1], status: 'done', activity: 'Done', updatedAtMs: clock },
+    ];
+    await daemon.sync();
+    assert.equal(daemon.getStatus().dailyStats.completed, 1);
+    const saved = JSON.parse(readFileSync(stateFile, 'utf-8'));
+    assert.equal(saved.dailyStats.completed, 1);
+
+    // Date rollover resets dailyStats
+    clock += 2 * 24 * 60 * 60 * 1000;
+    await daemon.sync();
+    assert.equal(daemon.getStatus().dailyStats.completed, 0);
+
+    // Clearing the display makes OK/BACK/START gestures clean no-ops so BUSY Bar's own UI stays usable
+    await daemon.clear();
+    assert.equal(daemon.getStatus().snapshot.phase, 'cleared');
+    const drawsWhenCleared = mock.state.drawCalls.length;
+    const alertsBeforeNoop = daemon.getStatus().alerts;
+    assert.equal(await daemon.handleButtonGesture({ button: 'ok', gesture: 'short_press' }), null);
+    assert.equal(await daemon.handleButtonGesture({ button: 'start', gesture: 'short_press' }), null);
+    assert.equal(await daemon.handleButtonGesture({ button: 'back', gesture: 'short_press' }), null);
+    assert.equal(mock.state.drawCalls.length, drawsWhenCleared);
+    assert.deepEqual(daemon.getStatus().alerts, alertsBeforeNoop);
+  } finally {
+    await daemon.stop();
     await mock.close();
     rmSync(tmp, { recursive: true, force: true });
   }
