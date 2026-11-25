@@ -79,6 +79,13 @@ export const DEFAULT_CONFIG = {
       enabled: true,
       defaultTtlMs: 3600000,
     },
+    phoenix: {
+      enabled: true,
+      stuckAfterMs: 600000,
+      staleAfterMs: 21600000,
+      dataDirs: null,
+      dbPaths: null,
+    },
     customModules: [],
   },
   controls: {
@@ -233,6 +240,22 @@ export function loadConfig({ configPath, overrides = {}, env = process.env, home
   if (multiBtnEnv !== undefined) {
     envOverrides.controls = { ...(envOverrides.controls || {}), multiButton: multiBtnEnv };
   }
+  const phoenixEnv = parseBoolEnv(env.BUSY_BAR_PHOENIX);
+  if (phoenixEnv !== undefined) {
+    envOverrides.providers = {
+      ...(envOverrides.providers || {}),
+      phoenix: { ...(envOverrides.providers?.phoenix || {}), enabled: phoenixEnv },
+    };
+  }
+  if (typeof env.BUSY_BAR_PHOENIX_DIR === 'string' && env.BUSY_BAR_PHOENIX_DIR.trim()) {
+    envOverrides.providers = {
+      ...(envOverrides.providers || {}),
+      phoenix: {
+        ...(envOverrides.providers?.phoenix || {}),
+        dataDirs: [env.BUSY_BAR_PHOENIX_DIR.trim()],
+      },
+    };
+  }
 
   const merged = deepMerge(DEFAULT_CONFIG, fileConfig, envOverrides, overrides);
 
@@ -245,6 +268,16 @@ export function loadConfig({ configPath, overrides = {}, env = process.env, home
   if (Array.isArray(merged.providers.antigravity.appDataDirs)) {
     merged.providers.antigravity.appDataDirs = merged.providers.antigravity.appDataDirs.map((d) =>
       expandHome(d, homeDir)
+    );
+  }
+  if (Array.isArray(merged.providers.phoenix?.dataDirs)) {
+    merged.providers.phoenix.dataDirs = merged.providers.phoenix.dataDirs.map((d) =>
+      expandHome(d, homeDir)
+    );
+  }
+  if (Array.isArray(merged.providers.phoenix?.dbPaths)) {
+    merged.providers.phoenix.dbPaths = merged.providers.phoenix.dbPaths.map((p) =>
+      expandHome(p, homeDir)
     );
   }
   if (Array.isArray(merged.providers.customModules)) {

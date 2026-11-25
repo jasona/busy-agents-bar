@@ -1,4 +1,5 @@
 import { AntigravityProvider } from './antigravity/index.mjs';
+import { PhoenixProvider } from './phoenix/index.mjs';
 import { ProviderRegistry } from './registry.mjs';
 import { HookProvider } from './webhook-provider.mjs';
 
@@ -15,6 +16,12 @@ export async function createProviderRegistry(config, ctx = {}) {
     registry.register(antigravityProvider);
   }
 
+  let phoenixProvider = null;
+  if (provCfg.phoenix?.enabled !== false) {
+    phoenixProvider = new PhoenixProvider(provCfg.phoenix || {});
+    registry.register(phoenixProvider);
+  }
+
   let hookProvider = null;
   if (provCfg.hooks?.enabled !== false) {
     hookProvider = new HookProvider(provCfg.hooks || {});
@@ -25,5 +32,5 @@ export async function createProviderRegistry(config, ctx = {}) {
     await registry.loadCustomModules(provCfg.customModules, config, ctx);
   }
 
-  return { registry, antigravityProvider, hookProvider };
+  return { registry, antigravityProvider, phoenixProvider, hookProvider };
 }

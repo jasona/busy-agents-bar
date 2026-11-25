@@ -285,4 +285,26 @@ test('renderFrontDisplay spotlight, pulse, and toast overlay satisfy OpenAPI and
   assertValidOpenApiPayload(toast);
   assert.equal(toast.elements.find((e) => e.id === 'toast_text').text, 'CHIME OFF');
   assert.ok(renderAsciiPreview(snap, toast).includes('toast'));
+
+  // Phoenix Signal Orange palette & PHX tag render cleanly
+  assert.deepEqual(getProviderMeta('phoenix'), { tag: 'PHX', color: '#E85D26FF', dimColor: '#5C240EFF' });
+  assert.equal(getProviderMeta('phoenix-code').tag, 'PHX');
+  assert.equal(getProviderMeta('t3').tag, 'PHX');
+  const phxSnap = buildFleetSnapshot(
+    [
+      {
+        id: 'phx-1',
+        provider: 'phoenix',
+        project: 'server',
+        activity: 'Run rtk pnpm test',
+        status: 'running',
+        updatedAtMs: now,
+      },
+    ],
+    { now }
+  );
+  const phxSpot = renderFrontDisplay(phxSnap, { config: DEFAULT_CONFIG, viewMode: 'spotlight', now });
+  assertValidOpenApiPayload(phxSpot);
+  assert.equal(phxSpot.elements.find((e) => e.id === 'provider').text, 'PHX');
+  assert.equal(phxSpot.elements.find((e) => e.id === 'provider').color, '#E85D26FF');
 });
