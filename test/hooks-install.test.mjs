@@ -6,6 +6,7 @@ import test from 'node:test';
 import {
   CLAUDE_HOOK_EVENTS,
   CODEX_HOOK_EVENTS,
+  PHOENIX_HOOK_EVENTS,
   installHooksForTargets,
 } from '../src/providers/hooks-install.mjs';
 
@@ -69,6 +70,21 @@ test('installHooksForTargets merges cleanly, is idempotent, honors dryRun, and u
       'utf-8'
     );
 
+    mkdirSync(join(home, '.phoenix', 'userdata'), { recursive: true });
+    writeFileSync(
+      join(home, '.phoenix', 'userdata', 'hooks.json'),
+      JSON.stringify(
+        {
+          hooks: {
+            Stop: [{ hooks: [{ type: 'command', command: 'notify-send done' }] }],
+          },
+        },
+        null,
+        2
+      ),
+      'utf-8'
+    );
+
     // 1. Dry-run makes no disk writes
     const dryRes = installHooksForTargets(['all'], {
       homeDir: home,
@@ -76,17 +92,17 @@ test('installHooksForTargets merges cleanly, is idempotent, honors dryRun, and u
       binPath,
       dryRun: true,
     });
-    assert.equal(dryRes.length, 3);
+    assert.equal(dryRes.length, 4);
     const claudeBefore = JSON.parse(readFileSync(join(home, '.claude', 'settings.json'), 'utf-8'));
     assert.equal(claudeBefore.hooks.UserPromptSubmit, undefined);
 
     // 2. Install all targets (plus alias deduplication)
-    const first = installHooksForTargets(['claude-code', 'chatgpt', 'antigravity', 'claude'], {
+    const first = installHooksForTargets(['claude-code', 'chatgpt', 'antigravity', 'phoenix-code', 't3', 'claude'], {
       homeDir: home,
       nodeBin,
       binPath,
     });
-    assert.equal(first.length, 3);
+    assert.equal(first.length, 4);
     assert.ok(first.every((r) => r.changed === true));
 
     const claudeAfter = JSON.parse(readFileSync(join(home, '.claude', 'settings.json'), 'utf-8'));
@@ -116,13 +132,23 @@ test('installHooksForTargets merges cleanly, is idempotent, honors dryRun, and u
     assert.ok(agyAfter['other-hook']);
     assert.ok(agyAfter['busy-bar-stop']);
 
+    const phxAfter = JSON.parse(readFileSync(join(home, '.phoenix', 'userdata', 'hooks.json'), 'utf-8'));
+    assert.equal(phxAfter.hooks.Stop.length, 2);
+    assert.equal(phxAfter.hooks.Stop[0].hooks[0].command, 'notify-send done');
+    for (const ev of PHOENIX_HOOK_EVENTS) {
+      assert.ok(
+        phxAfter.hooks[ev].some((g) => g.hooks.some((h) => h.command.includes('hook phoenix'))),
+        `Missing Phoenix hook for ${ev}`
+      );
+    }
+
     // 3. Re-running install is completely idempotent (changed === false, no duplicates)
     const second = installHooksForTargets(['all'], { homeDir: home, nodeBin, binPath });
     assert.ok(second.every((r) => r.changed === false));
     const claudeRe = JSON.parse(readFileSync(join(home, '.claude', 'settings.json'), 'utf-8'));
     assert.equal(claudeRe.hooks.PreToolUse.length, 2);
 
-    // 4. Uninstall removes only managed hooks and preserves rtk, impeccable, and other-hook
+    // 4. Uninstall removes only managed hooks and preserves rtk, impeccable, notify-send, and other-hook
     const un = installHooksForTargets(['all'], { homeDir: home, nodeBin, binPath, uninstall: true });
     assert.ok(un.every((r) => r.changed === true));
 
@@ -142,6 +168,11 @@ test('installHooksForTargets merges cleanly, is idempotent, honors dryRun, and u
     const agyUn = JSON.parse(readFileSync(join(home, '.gemini', 'config', 'hooks.json'), 'utf-8'));
     assert.ok(agyUn['other-hook']);
     assert.equal(agyUn['busy-bar-stop'], undefined);
+
+    const phxUn = JSON.parse(readFileSync(join(home, '.phoenix', 'userdata', 'hooks.json'), 'utf-8'));
+    assert.equal(phxUn.hooks.Stop.length, 1);
+    assert.equal(phxUn.hooks.Stop[0].hooks[0].command, 'notify-send done');
+    assert.equal(phxUn.hooks.UserPromptSubmit, undefined);
   } finally {
     rmSync(home, { recursive: true, force: true });
   }

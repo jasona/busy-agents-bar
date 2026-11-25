@@ -22,6 +22,18 @@ export const CODEX_HOOK_EVENTS = [
   'SessionEnd',
 ];
 
+export const PHOENIX_HOOK_EVENTS = [
+  'UserPromptSubmit',
+  'PreToolUse',
+  'PostToolUse',
+  'PermissionRequest',
+  'Notification',
+  'Stop',
+  'RunError',
+  'Interrupt',
+  'SessionEnd',
+];
+
 function readJsonObjectOrEmpty(filePath) {
   if (!existsSync(filePath)) return {};
   const raw = readFileSync(filePath, 'utf-8').trim();
@@ -43,6 +55,9 @@ function isManagedCommand(command, target) {
   }
   if (target === 'antigravity') {
     return /(?:busy-bar(?:\.mjs)?)\s+(?:agy-stop-hook|hook\s+(?:antigravity|agy))\b/.test(command);
+  }
+  if (target === 'phoenix') {
+    return /(?:busy-bar(?:\.mjs)?)\s+hook\s+(?:phoenix|phoenix-code|t3)\b/.test(command);
   }
   return false;
 }
@@ -220,6 +235,38 @@ export function installCodexHooks({
   };
 }
 
+/**
+ * Installs or uninstalls Phoenix lifecycle hooks in `~/.phoenix/userdata/hooks.json` while preserving existing hooks.
+ */
+export function installPhoenixHooks({
+  homeDir = homedir(),
+  nodeBin = process.execPath,
+  binPath,
+  dryRun = false,
+  uninstall = false,
+} = {}) {
+  const filePath = join(homeDir, '.phoenix', 'userdata', 'hooks.json');
+  const existing = readJsonObjectOrEmpty(filePath);
+  const next = structuredClone(existing);
+  const command = `${nodeBin} ${binPath} hook phoenix`;
+
+  next.hooks = mergeHookGroupsMap({
+    existingHooks: existing.hooks,
+    events: PHOENIX_HOOK_EVENTS,
+    target: 'phoenix',
+    command,
+    timeout: 3,
+    uninstall,
+  });
+
+  const res = writeIfChanged(filePath, next, { dryRun });
+  return {
+    target: 'phoenix',
+    action: uninstall ? 'uninstall' : 'install',
+    ...res,
+  };
+}
+
 const TARGET_ALIASES = {
   antigravity: 'antigravity',
   agy: 'antigravity',
@@ -227,10 +274,13 @@ const TARGET_ALIASES = {
   'claude-code': 'claude',
   codex: 'codex',
   chatgpt: 'codex',
+  phoenix: 'phoenix',
+  'phoenix-code': 'phoenix',
+  t3: 'phoenix',
 };
 
 /**
- * Resolves target names (`all`, `antigravity`, `claude`, `codex`, `chatgpt`) and applies hook changes.
+ * Resolves target names (`all`, `antigravity`, `claude`, `codex`, `chatgpt`, `phoenix`) and applies hook changes.
  */
 export function installHooksForTargets(rawTargets = ['all'], opts = {}) {
   const list = Array.isArray(rawTargets) && rawTargets.length > 0 ? rawTargets : ['all'];
@@ -251,12 +301,13 @@ export function installHooksForTargets(rawTargets = ['all'], opts = {}) {
       add('antigravity');
       add('claude');
       add('codex');
+      add('phoenix');
       continue;
     }
     const mapped = TARGET_ALIASES[token];
     if (!mapped) {
       throw new Error(
-        `Unknown hook target "${raw}" (expected all, antigravity, claude, codex, or chatgpt)`
+        `Unknown hook target "${raw}" (expected all, antigravity, claude, codex, chatgpt, or phoenix)`
       );
     }
     add(mapped);
@@ -266,6 +317,7 @@ export function installHooksForTargets(rawTargets = ['all'], opts = {}) {
     antigravity: installAntigravityHook,
     claude: installClaudeHooks,
     codex: installCodexHooks,
+    phoenix: installPhoenixHooks,
   };
 
   return canonical.map((t) => runners[t](opts));

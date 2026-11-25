@@ -4,11 +4,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
+import { loadConfig } from '../src/config.mjs';
+import { createProviderRegistry } from '../src/providers/index.mjs';
 import {
   PhoenixProvider,
   resolvePhoenixDbPaths,
   stripShellWrapper,
 } from '../src/providers/phoenix/index.mjs';
+import { HookProvider } from '../src/providers/webhook-provider.mjs';
 
 function createFixtureSchema(db) {
   db.exec(`
@@ -308,4 +311,120 @@ test('PhoenixProvider classifies running, approval, question, error/quota, done,
     provider.stop();
     rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+test('Phoenix SQLite polling is disabled by default (opt-in via BUSY_BAR_PHOENIX=true) and Phoenix hooks drive full lifecycle without false stuck alerts', async () => {
+  const defaultCfg = loadConfig({ configPath: undefined, env: {}, homeDir: '/tmp/nonexistent-home' });
+  assert.equal(defaultCfg.providers.phoenix.enabled, false);
+  const { phoenixProvider: defaultPhx } = await createProviderRegistry(defaultCfg);
+  assert.equal(defaultPhx, null);
+
+  const optInCfg = loadConfig({
+    configPath: undefined,
+    env: { BUSY_BAR_PHOENIX: 'true' },
+    homeDir: '/tmp/nonexistent-home',
+  });
+  assert.equal(optInCfg.providers.phoenix.enabled, true);
+  const { phoenixProvider: optInPhx } = await createProviderRegistry(optInCfg);
+  assert.notEqual(optInPhx, null);
+
+  const hooks = new HookProvider();
+  const t0 = 1_795_700_000_000;
+
+  const s1 = hooks.ingest(
+    'phoenix',
+    {
+      hook_event_name: 'UserPromptSubmit',
+      threadId: 'th-phx-1',
+      project: 'busy-bar',
+      cwd: '/work/busy-bar',
+      title: 'Rethink Phoenix',
+      startedAtMs: t0 - 5_000,
+    },
+    t0
+  );
+  assert.equal(s1.provider, 'phoenix');
+  assert.equal(s1.status, 'running');
+  assert.equal(s1.turnStartedAtMs, t0 - 5_000);
+
+  const s2 = hooks.ingest(
+    'phoenix',
+    {
+      hook_event_name: 'PreToolUse',
+      threadId: 'th-phx-1',
+      project: 'busy-bar',
+      tool_name: 'Bash',
+      tool_input: { command: 'npm test' },
+    },
+    t0 + 2_000
+  );
+  assert.equal(s2.status, 'running');
+  assert.equal(s2.activity, 'Run npm test');
+
+  const s3 = hooks.ingest(
+    'phoenix',
+    {
+      hook_event_name: 'PermissionRequest',
+      threadId: 'th-phx-1',
+      project: 'busy-bar',
+      requestKind: 'command_execution',
+      tool_name: 'Bash',
+      tool_input: { command: 'rm -rf dist' },
+      message: 'Approval required',
+    },
+    t0 + 4_000
+  );
+  assert.equal(s3.status, 'waiting');
+  assert.equal(s3.attentionKind, 'approval');
+
+  const s4 = hooks.ingest(
+    'phoenix',
+    {
+      hook_event_name: 'PostToolUse',
+      threadId: 'th-phx-1',
+      project: 'busy-bar',
+      requestKind: 'command_execution',
+      requestStatus: 'resolved',
+      activity: 'Working',
+    },
+    t0 + 6_000
+  );
+  assert.equal(s4.status, 'running');
+  assert.equal(s4.attentionKind, null);
+
+  const s5 = hooks.ingest(
+    'phoenix',
+    {
+      hook_event_name: 'Notification',
+      threadId: 'th-phx-1',
+      project: 'busy-bar',
+      notification_type: 'user_input',
+      message: 'Deploy to staging?',
+    },
+    t0 + 8_000
+  );
+  assert.equal(s5.status, 'waiting');
+  assert.equal(s5.attentionKind, 'question');
+  assert.equal(s5.activity, 'Deploy to staging?');
+
+  const s6 = hooks.ingest(
+    'phoenix',
+    {
+      hook_event_name: 'Stop',
+      threadId: 'th-phx-1',
+      project: 'busy-bar',
+      runStatus: 'completed',
+    },
+    t0 + 10_000
+  );
+  assert.equal(s6.status, 'done');
+
+  // Even 20 minutes later, a completed hook session stays done rather than flipping to STUCK
+  const latePoll = hooks.poll(t0 + 20 * 60_000);
+  assert.equal(latePoll.length, 1);
+  assert.equal(latePoll[0].status, 'done');
+
+  // Interrupt / SessionEnd immediately clear the session
+  hooks.ingest('phoenix', { hook_event_name: 'Interrupt', threadId: 'th-phx-1' }, t0 + 21 * 60_000);
+  assert.deepEqual(hooks.poll(t0 + 21 * 60_000), []);
 });

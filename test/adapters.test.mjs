@@ -254,9 +254,23 @@ test('phoenixHookAdapter maps Phoenix run statuses, runtime requests, quota erro
   assert.equal(ask.session.status, 'waiting');
   assert.equal(ask.session.attentionKind, 'question');
 
+  const notif = phoenixHookAdapter(
+    'phoenix',
+    {
+      threadId: 'phx-1',
+      hook_event_name: 'Notification',
+      notification_type: 'user_input',
+      message: 'Choose target env',
+    },
+    NOW
+  );
+  assert.equal(notif.session.status, 'waiting');
+  assert.equal(notif.session.attentionKind, 'question');
+  assert.equal(notif.session.activity, 'Choose target env');
+
   const quota = phoenixHookAdapter(
     'phoenix',
-    { threadId: 'phx-1', runStatus: 'failed', errorClass: 'usage_limit', message: 'Limit reached' },
+    { threadId: 'phx-1', event: 'RunError', errorClass: 'usage_limit', message: 'Limit reached' },
     NOW
   );
   assert.equal(quota.session.status, 'error');

@@ -108,6 +108,46 @@ test('renderFrontDisplay satisfies OpenAPI constraints across all phases and 18 
   }
 });
 
+test('completion display identifies the latest finished task without claiming everything is done', () => {
+  const now = Date.now();
+  const finished = {
+    id: 'phx-done', provider: 'phoenix', project: 'server', title: 'Fix login',
+    status: 'done', updatedAtMs: now,
+  };
+  const older = {
+    id: 'cdx-done', provider: 'codex', title: 'Update docs',
+    status: 'done', updatedAtMs: now - 1000,
+  };
+  for (const animations of [true, false]) {
+    for (const sessions of [[finished], [older, finished]]) {
+      const snapshot = buildFleetSnapshot(sessions, { now });
+      const payload = renderFrontDisplay(snapshot, {
+        config: { ...DEFAULT_CONFIG, display: { ...DEFAULT_CONFIG.display, animations } },
+        dailyStats: { completed: 99 },
+      });
+      assertValidOpenApiPayload(payload);
+      assert.equal(payload.elements.find((e) => e.id === 'primary').text, `${sessions.length} DONE`);
+      assert.equal(payload.elements.find((e) => e.id === 'secondary').text,
+        sessions.length > 1 ? 'Latest Phoenix: Fix login' : 'Phoenix: Fix login');
+    }
+  }
+
+  for (const status of ['running', 'waiting', 'error']) {
+    const snapshot = buildFleetSnapshot([
+      finished, { id: 'still-active', provider: 'codex', status, updatedAtMs: now },
+    ], { now });
+    assert.equal(snapshot.phase, status);
+    const payload = renderFrontDisplay(snapshot, { config: DEFAULT_CONFIG });
+    assertValidOpenApiPayload(payload);
+    assert.equal(payload.elements.some((e) => e.text?.includes('ALL DONE')), false);
+    assert.match(payload.elements.find((e) => e.id === 'primary').text, /RUN|WAIT|ERR/);
+  }
+
+  const snapshot = buildFleetSnapshot([finished], { now });
+  const renamed = buildFleetSnapshot([{ ...finished, title: 'Fix logout' }], { now });
+  assert.notEqual(snapshot.fingerprint, renamed.fingerprint, 'changed completion identity triggers a redraw');
+});
+
 test('renderFrontDisplay respects urgentOverrideTimer priority flag', () => {
   const now = Date.now();
   const snap = buildFleetSnapshot(
@@ -286,7 +326,7 @@ test('renderFrontDisplay spotlight, pulse, and toast overlay satisfy OpenAPI and
   assert.equal(toast.elements.find((e) => e.id === 'toast_text').text, 'CHIME OFF');
   assert.ok(renderAsciiPreview(snap, toast).includes('toast'));
 
-  // Phoenix Signal Orange palette & PHX tag render cleanly
+  // Phoenix keeps its compact palette tag but uses its full name in spotlight mode.
   assert.deepEqual(getProviderMeta('phoenix'), { tag: 'PHX', color: '#E85D26FF', dimColor: '#5C240EFF' });
   assert.equal(getProviderMeta('phoenix-code').tag, 'PHX');
   assert.equal(getProviderMeta('t3').tag, 'PHX');
@@ -305,6 +345,7 @@ test('renderFrontDisplay spotlight, pulse, and toast overlay satisfy OpenAPI and
   );
   const phxSpot = renderFrontDisplay(phxSnap, { config: DEFAULT_CONFIG, viewMode: 'spotlight', now });
   assertValidOpenApiPayload(phxSpot);
-  assert.equal(phxSpot.elements.find((e) => e.id === 'provider').text, 'PHX');
+  assert.equal(phxSpot.elements.find((e) => e.id === 'provider').text, 'Phoenix');
+  assert.equal(phxSpot.elements.find((e) => e.id === 'project'), undefined);
   assert.equal(phxSpot.elements.find((e) => e.id === 'provider').color, '#E85D26FF');
 });

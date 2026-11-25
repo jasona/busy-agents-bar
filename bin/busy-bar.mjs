@@ -343,7 +343,7 @@ Usage:
   busy-bar alerts [--blink on|off] [--chime on|off]
   busy-bar watch-buttons
   busy-bar hook <claude|codex|chatgpt|antigravity|phoenix> [--event <name>]
-  busy-bar install-hooks [all|antigravity|claude|codex|chatgpt ...] [--dry-run] [--uninstall]
+  busy-bar install-hooks [all|antigravity|claude|codex|chatgpt|phoenix ...] [--dry-run] [--uninstall]
   busy-bar install-service [--dry-run]
   busy-bar install-hook [--dry-run] [--uninstall]
 

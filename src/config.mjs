@@ -80,7 +80,7 @@ export const DEFAULT_CONFIG = {
       defaultTtlMs: 3600000,
     },
     phoenix: {
-      enabled: true,
+      enabled: false,
       stuckAfterMs: 600000,
       staleAfterMs: 21600000,
       dataDirs: null,

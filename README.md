@@ -7,13 +7,13 @@
 
 A standalone, zero-dependency Node.js daemon that monitors local AI coding agent sessions in real time and drives a USB-connected [**BUSY Bar**](https://busy.app/products/busy-bar) (`72 × 16` front RGB LED matrix) so you can tell at a glance which agents are running, waiting on your input, errored, or finished.
 
-Built for **Antigravity** (transcript + swarm telemetry) and [**Phoenix**](../phoenix-code/) (`~/.phoenix/userdata/statev2.sqlite`) out of the box, with a lightweight webhook/provider extensibility layer for Claude Code, Codex, CI runners, or custom tools.
+Built for **Antigravity** (transcript + swarm telemetry) and [**Phoenix**](../phoenix-code/) (`~/.phoenix/userdata/hooks.json` lifecycle hooks) out of the box, with a lightweight webhook/provider extensibility layer for Claude Code, Codex, CI runners, or custom tools.
 
 ---
 
 ## Visual Display Modes (`72 × 16` Front RGB)
 
-While active (`running`, `waiting`, or `error`), the daemon auto-rotates between **Fleet** and **Spotlight** views every 5 seconds (configurable), snaps immediately back to **Fleet** when an urgent approval/error arrives, and stays calm in **Fleet** for `ALL DONE`:
+While active (`running`, `waiting`, or `error`), the daemon auto-rotates between **Fleet** and **Spotlight** views every 5 seconds (configurable), snaps immediately back to **Fleet** when an urgent approval/error arrives, and stays in **Fleet** to show the completion count and latest finished task:
 
 1. **Fleet Overview (`fleet`)** — Gradient left status rail + stock status icon (`spinner_front_8x8.anim`, `hourglass_5x5.image`, `error_front_8x8.image`, `checkmark_front_8x8.image`) + primary count (`2 RUN`, `1 WAIT`, `1 ERR`) + native on-device `time_since` timer (`mm:ss`, RTC-aligned via `GET /api/time`) + gradient bottom pips colored by phase & provider:
    - **Antigravity (`AGY`)**: Cyan `#00D4FF`
@@ -47,16 +47,16 @@ While active (`running`, `waiting`, or `error`), the daemon auto-rotates between
 | **`error`** | Highest | Red gradient · `<N> ERR` | `<M>W` / `<M>R` or project/tag | `#FF0000FF` (red) | `shared/calendar_event_starts.snd` |
 | **`waiting`** | 2nd | Escalating amber->red · `<N> WAIT` | `<M>R` or live `time_since` wait timer | `#FFAA00FF` (amber) | `shared/calendar_event_starts.snd` |
 | **`running`** | 3rd | Green->cyan gradient + spinner · `<N> RUN` | `<M> OK` or live `time_since` turn timer | Off | None |
-| **`all_done`** | 4th | Teal gradient + checkmark · `ALL DONE` | `x<N>` count; stays on until cleared | `#00FFAAFF` (teal) | `shared/volume_change.snd` |
+| **`all_done`** | 4th | Teal gradient + checkmark · `<N> DONE` | Latest finished agent/task; stays on until cleared | `#00FFAAFF` (teal) | `shared/volume_change.snd` |
 | **`cleared`** | Lowest | Releases screen (`DELETE /api/display/draw`) unless `pulse` is pinned | — | Off | None |
 
 ---
 
 ## Features
 
-- **Real-Time Multi-Agent Telemetry**: Watches `~/.gemini/*/brain/` transcripts (`transcript.jsonl`) and swarms (`members.json`, `board.jsonl`, `view.json`), **Phoenix** (`~/.phoenix/userdata/statev2.sqlite` + WAL Orchestration v2 runs, approvals, questions, quota errors, and subagents via `node:sqlite`), plus Claude Code & Codex hooks with exact `tool_input` targets (`Edit foo.mjs`, `Run npm test`) and per-turn elapsed timers (`turnStartedAtMs`).
+- **Real-Time Multi-Agent Telemetry**: Watches `~/.gemini/*/brain/` transcripts (`transcript.jsonl`) and swarms (`members.json`, `board.jsonl`, `view.json`), plus push lifecycle hooks for **Phoenix** (`~/.phoenix/userdata/hooks.json`), **Claude Code** (`~/.claude/settings.json`), and **Codex** (`~/.codex/hooks.json`) with exact `tool_input` targets (`Edit foo.mjs`, `Run npm test`) and per-turn elapsed timers (`turnStartedAtMs`). Legacy Phoenix SQLite polling (`providers.phoenix.enabled: false` by default) remains available opt-in via `BUSY_BAR_PHOENIX=true`.
 - **Auto-Rotating View Carousel & Live Timers**: Cycles `fleet` ↔ active `spotlight` sessions automatically on the `72 × 16` front RGB matrix while aligning hardware `CountdownElement` (`time_since`) timers to the BUSY Bar's RTC (`GET /api/time`).
-- **Stay On Until Cleared + Daily Stats**: `ALL DONE` remains latched until cleared; completed/error tallies persist per local calendar day in `state.json`.
+- **Stay On Until Cleared + Daily Stats**: The tracked completion count and latest finished agent/task remain latched until cleared; completed/error tallies persist per local calendar day in `state.json`.
 - **Multi-Button Hardware Controls (`/api/status/ws`)**: Zero-dependency `BSB_State.State` protobuf decoder distinguishes `short_press` and `long_press` (`>= 700ms`) across **`OK`**, **`BACK`**, and **`START`** with crisp bordered confirmation toasts (`CHIME OFF`, `BLINK ON`, `DISMISSED`, `AUTO MODE`).
 - **Independent Alert Controls**: Enable or disable LED blinking (`led_notification_color`) and speaker chimes (`/api/audio/play`) via config file, env vars, CLI flags, HTTP `POST /alerts`, or the `START` button.
 - **Flicker-Free Smart Redraws & USB Resilience**: Only clears prior canvas elements when switching views, phases, or removing IDs so animations and timers stay smooth, and automatically re-syncs after USB reconnects.
@@ -101,21 +101,22 @@ systemctl --user enable --now busy-bar.service
 systemctl --user status busy-bar.service
 ```
 
-### Install Provider Hooks (Claude Code, Codex / ChatGPT, Antigravity)
+### Install Provider Hooks (Claude Code, Codex / ChatGPT, Phoenix, Antigravity)
 
-Built-in native hook adapters and idempotent installers ship for **Claude Code** (`~/.claude/settings.json`), **OpenAI Codex / ChatGPT** (`~/.codex/hooks.json`), and **Antigravity** (`~/.gemini/config/hooks.json`). All existing user hooks and settings are preserved untouched:
+Built-in native hook adapters and idempotent installers ship for **Claude Code** (`~/.claude/settings.json`), **OpenAI Codex / ChatGPT** (`~/.codex/hooks.json`), **Phoenix** (`~/.phoenix/userdata/hooks.json`), and **Antigravity** (`~/.gemini/config/hooks.json`). All existing user hooks and settings are preserved untouched:
 
 ```bash
 # Preview the merged hook changes for all supported agents
 node ./bin/busy-bar.mjs install-hooks all --dry-run
 
-# Install Claude Code and Codex/ChatGPT hooks (or use "all" to include Antigravity)
-node ./bin/busy-bar.mjs install-hooks claude codex
+# Install Phoenix, Claude Code, and Codex/ChatGPT hooks (or use "all" to include Antigravity)
+node ./bin/busy-bar.mjs install-hooks phoenix claude codex
 
 # Remove only busy-bar's managed hooks cleanly
 node ./bin/busy-bar.mjs install-hooks all --uninstall
 ```
 
+- **Phoenix (`~/.phoenix/userdata/hooks.json`)**: Hooks `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PermissionRequest`, `Notification`, `Stop`, `RunError`, `Interrupt`, and `SessionEnd` via `busy-bar hook phoenix`. Phoenix executes hooks asynchronously off Orchestration v2 domain events and clears waiting/stuck states cleanly on `Stop`, `Interrupt`, and `SessionEnd` without relying on SQLite `stuckAfterMs` polling.
 - **Claude Code (`~/.claude/settings.json`)**: Hooks `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PermissionRequest`, `Notification` (`permission_prompt`, `elicitation_dialog`, errors; ignores `idle_prompt`), `Stop`, and `SessionEnd` via `busy-bar hook claude`.
 - **Codex / ChatGPT (`~/.codex/hooks.json`)**: Hooks `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PermissionRequest`, `Stop`, `Interrupt`, and `SessionEnd` via `busy-bar hook codex` (also supports legacy Codex `notify` `agent-turn-complete` payloads). Note that Codex prompts or records hook trust under `[hooks.state]` in `~/.codex/config.toml` the first time you run a session with new hooks.
 - **Antigravity (`~/.gemini/config/hooks.json`)**: Adds `"busy-bar-stop"` to auto-dismiss turns when `Stop` fires with `"terminationReason": "USER_CANCELED"`.
@@ -165,7 +166,7 @@ busy-bar sounds
 busy-bar alerts [--blink on|off] [--chime on|off]
 busy-bar watch-buttons
 busy-bar hook <claude|codex|chatgpt|antigravity|phoenix> [--event <name>]
-busy-bar install-hooks [all|antigravity|claude|codex|chatgpt ...] [--dry-run] [--uninstall]
+busy-bar install-hooks [all|antigravity|claude|codex|chatgpt|phoenix ...] [--dry-run] [--uninstall]
 busy-bar install-service [--dry-run]
 busy-bar install-hook [--dry-run] [--uninstall]
 ```
@@ -303,7 +304,7 @@ Copy [`config.example.json`](./config.example.json) to `~/.config/busy-bar/confi
       "defaultTtlMs": 3600000
     },
     "phoenix": {
-      "enabled": true,
+      "enabled": false,
       "stuckAfterMs": 600000,
       "staleAfterMs": 21600000,
       "dataDirs": null,
@@ -440,7 +441,7 @@ busy-agents-bar/
 │       ├── index.mjs                    # Registry factory from config
 │       ├── registry.mjs                 # Multi-provider polling, error isolation, custom ESM module loader
 │       ├── webhook-provider.mjs         # Push-based HookProvider + adapter registry
-│       ├── hooks-install.mjs            # Idempotent hook installers for Claude Code, Codex, Antigravity
+│       ├── hooks-install.mjs            # Idempotent hook installers for Claude Code, Codex, Phoenix, Antigravity
 │       ├── adapters/
 │       │   ├── index.mjs                # Built-in adapter registration
 │       │   ├── generic.mjs              # Generic normalized payload adapter
