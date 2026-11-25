@@ -7,7 +7,7 @@
 
 A standalone, zero-dependency Node.js daemon that monitors local AI coding agent sessions in real time and drives a USB-connected [**BUSY Bar**](https://busy.app/products/busy-bar) (`72 × 16` front RGB LED matrix) so you can tell at a glance which agents are running, waiting on your input, errored, or finished.
 
-Built for **Antigravity** out of the box (transcript + swarm telemetry), with a lightweight webhook/provider extensibility layer for Claude Code, Codex, CI runners, or custom tools.
+Built for **Antigravity** (transcript + swarm telemetry) and [**Phoenix**](../phoenix-code/) (`~/.phoenix/userdata/statev2.sqlite`) out of the box, with a lightweight webhook/provider extensibility layer for Claude Code, Codex, CI runners, or custom tools.
 
 ---
 
@@ -19,6 +19,7 @@ While active (`running`, `waiting`, or `error`), the daemon auto-rotates between
    - **Antigravity (`AGY`)**: Cyan `#00D4FF`
    - **Claude Code (`CLD`)**: Coral `#FF7A45`
    - **Codex / ChatGPT (`CDX`)**: Violet `#C084FC`
+   - **Phoenix (`PHX`)**: Signal Orange `#E85D26`
    - **Waiting Urgency Escalation**: Unanswered `waiting` sessions warm from amber (`<2m`) → deep orange (`>=2m`) → hot red-magenta (`>=5m`).
 
 ```text
@@ -53,7 +54,7 @@ While active (`running`, `waiting`, or `error`), the daemon auto-rotates between
 
 ## Features
 
-- **Real-Time Multi-Agent Telemetry**: Watches `~/.gemini/*/brain/` transcripts (`transcript.jsonl`) and swarms (`members.json`, `board.jsonl`, `view.json`), plus Claude Code & Codex hooks with exact `tool_input` targets (`Edit foo.mjs`, `Run npm test`) and per-turn elapsed timers (`turnStartedAtMs`).
+- **Real-Time Multi-Agent Telemetry**: Watches `~/.gemini/*/brain/` transcripts (`transcript.jsonl`) and swarms (`members.json`, `board.jsonl`, `view.json`), **Phoenix** (`~/.phoenix/userdata/statev2.sqlite` + WAL Orchestration v2 runs, approvals, questions, quota errors, and subagents via `node:sqlite`), plus Claude Code & Codex hooks with exact `tool_input` targets (`Edit foo.mjs`, `Run npm test`) and per-turn elapsed timers (`turnStartedAtMs`).
 - **Auto-Rotating View Carousel & Live Timers**: Cycles `fleet` ↔ active `spotlight` sessions automatically on the `72 × 16` front RGB matrix while aligning hardware `CountdownElement` (`time_since`) timers to the BUSY Bar's RTC (`GET /api/time`).
 - **Stay On Until Cleared + Daily Stats**: `ALL DONE` remains latched until cleared; completed/error tallies persist per local calendar day in `state.json`.
 - **Multi-Button Hardware Controls (`/api/status/ws`)**: Zero-dependency `BSB_State.State` protobuf decoder distinguishes `short_press` and `long_press` (`>= 700ms`) across **`OK`**, **`BACK`**, and **`START`** with crisp bordered confirmation toasts (`CHIME OFF`, `BLINK ON`, `DISMISSED`, `AUTO MODE`).
@@ -158,12 +159,12 @@ busy-bar reset
 busy-bar dismiss --session <id> [--provider <name>]
 busy-bar sync-once [--no-blink]
 busy-bar emit --provider <name> --session <id> --status <running|waiting|error|done|idle> [options]
-busy-bar test-screen [running|waiting|error|all_done|mixed|swarm] [--view <fleet|spotlight|pulse>] [--dry-run] [--no-blink] [--no-animations] [--no-timers]
+busy-bar test-screen [running|waiting|error|all_done|mixed|swarm|phoenix] [--view <fleet|spotlight|pulse>] [--dry-run] [--no-blink] [--no-animations] [--no-timers]
 busy-bar test-chime [waiting|error|all_done]
 busy-bar sounds
 busy-bar alerts [--blink on|off] [--chime on|off]
 busy-bar watch-buttons
-busy-bar hook <claude|codex|chatgpt|antigravity> [--event <name>]
+busy-bar hook <claude|codex|chatgpt|antigravity|phoenix> [--event <name>]
 busy-bar install-hooks [all|antigravity|claude|codex|chatgpt ...] [--dry-run] [--uninstall]
 busy-bar install-service [--dry-run]
 busy-bar install-hook [--dry-run] [--uninstall]
@@ -301,6 +302,13 @@ Copy [`config.example.json`](./config.example.json) to `~/.config/busy-bar/confi
       "enabled": true,
       "defaultTtlMs": 3600000
     },
+    "phoenix": {
+      "enabled": true,
+      "stuckAfterMs": 600000,
+      "staleAfterMs": 21600000,
+      "dataDirs": null,
+      "dbPaths": null
+    },
     "customModules": []
   },
   "controls": {
@@ -331,6 +339,8 @@ Copy [`config.example.json`](./config.example.json) to `~/.config/busy-bar/confi
 | `BUSY_BAR_ANIMATIONS` | `true` / `false` |
 | `BUSY_BAR_TIMERS` | `true` / `false` |
 | `BUSY_BAR_RESET_BUTTON` | `back`, `ok`, or `start` |
+| `BUSY_BAR_PHOENIX` | Enable/disable built-in Phoenix SQLite watcher (`true` / `false`) |
+| `BUSY_BAR_PHOENIX_DIR` | Override Phoenix data directory (`~/.phoenix` by default; `PHOENIX_HOME` also respected) |
 
 ---
 
@@ -435,7 +445,10 @@ busy-agents-bar/
 │       │   ├── index.mjs                # Built-in adapter registration
 │       │   ├── generic.mjs              # Generic normalized payload adapter
 │       │   ├── claude-code.mjs          # Claude Code hook payload adapter
-│       │   └── codex.mjs                # OpenAI Codex / ChatGPT hook payload adapter
+│       │   ├── codex.mjs                # OpenAI Codex / ChatGPT hook payload adapter
+│       │   └── phoenix.mjs              # Phoenix webhook / CLI hook payload adapter
+│       ├── phoenix/
+│       │   └── index.mjs                # PhoenixProvider (fs.watch + read-only node:sqlite statev2.sqlite watcher)
 │       └── antigravity/
 │           ├── discovery.mjs            # Brain directory & workspace project discovery
 │           ├── index.mjs                # AntigravityProvider (fs.watch + polling)
@@ -448,6 +461,7 @@ busy-agents-bar/
     ├── daemon.test.mjs
     ├── hooks-install.test.mjs
     ├── model.test.mjs
+    ├── phoenix.test.mjs
     ├── providers.test.mjs
     ├── renderer.test.mjs
     └── ws-input.test.mjs

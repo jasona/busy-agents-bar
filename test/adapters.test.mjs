@@ -9,6 +9,7 @@ import { loadConfig } from '../src/config.mjs';
 import { BusyBarDaemon } from '../src/daemon.mjs';
 import { claudeCodeHookAdapter } from '../src/providers/adapters/claude-code.mjs';
 import { codexHookAdapter } from '../src/providers/adapters/codex.mjs';
+import { phoenixHookAdapter } from '../src/providers/adapters/phoenix.mjs';
 import { ProviderRegistry } from '../src/providers/registry.mjs';
 import { HookProvider } from '../src/providers/webhook-provider.mjs';
 
@@ -216,6 +217,72 @@ test('codexHookAdapter maps Codex / ChatGPT lifecycle events, legacy notify, and
     codexHookAdapter('codex', { session_id: 'x1', hook_event_name: 'SessionEnd' }, NOW),
     { remove: true, sessionId: 'x1', provider: 'codex' }
   );
+});
+
+test('phoenixHookAdapter maps Phoenix run statuses, runtime requests, quota errors, and removals', () => {
+  const run = phoenixHookAdapter(
+    'phoenix',
+    {
+      threadId: 'phx-1',
+      cwd: '/work/phoenix-code/apps/server',
+      runStatus: 'running',
+      toolName: 'command_execution',
+      tool_input: { command: 'pnpm test' },
+    },
+    NOW
+  );
+  assert.equal(run.session.provider, 'phoenix');
+  assert.equal(run.session.project, 'server');
+  assert.equal(run.session.status, 'running');
+  assert.equal(run.session.activity, 'Run pnpm test');
+
+  const appr = phoenixHookAdapter(
+    't3',
+    { threadId: 'phx-1', project: 'server', requestKind: 'approval', prompt: 'Allow rm?' },
+    NOW
+  );
+  assert.equal(appr.session.provider, 'phoenix');
+  assert.equal(appr.session.status, 'waiting');
+  assert.equal(appr.session.attentionKind, 'approval');
+  assert.equal(appr.session.activity, 'Allow rm?');
+
+  const ask = phoenixHookAdapter(
+    'phoenix-code',
+    { threadId: 'phx-1', requestKind: 'user_input', message: 'Pick target branch' },
+    NOW
+  );
+  assert.equal(ask.session.status, 'waiting');
+  assert.equal(ask.session.attentionKind, 'question');
+
+  const quota = phoenixHookAdapter(
+    'phoenix',
+    { threadId: 'phx-1', runStatus: 'failed', errorClass: 'usage_limit', message: 'Limit reached' },
+    NOW
+  );
+  assert.equal(quota.session.status, 'error');
+  assert.equal(quota.session.attentionKind, 'quota');
+
+  const done = phoenixHookAdapter('phoenix', { threadId: 'phx-1', runStatus: 'completed' }, NOW);
+  assert.equal(done.session.status, 'done');
+
+  assert.deepEqual(
+    phoenixHookAdapter('phoenix', { threadId: 'phx-1', runStatus: 'cancelled' }, NOW),
+    { remove: true, sessionId: 'phx-1', provider: 'phoenix' }
+  );
+  assert.deepEqual(
+    phoenixHookAdapter('phoenix', { threadId: 'phx-1', event: 'ThreadArchived' }, NOW),
+    { remove: true, sessionId: 'phx-1', provider: 'phoenix' }
+  );
+
+  // Generic emit --provider phoenix compatibility
+  const generic = phoenixHookAdapter(
+    'phoenix',
+    { sessionId: 'phx-gen', project: 'web', status: 'waiting', attentionKind: 'approval' },
+    NOW
+  );
+  assert.equal(generic.session.id, 'phx-gen');
+  assert.equal(generic.session.provider, 'phoenix');
+  assert.equal(generic.session.status, 'waiting');
 });
 
 test('BusyBarDaemon processes native Claude Code and Codex webhook events end-to-end', async () => {

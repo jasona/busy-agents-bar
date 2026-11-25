@@ -21,6 +21,9 @@ const PROVIDER_PALETTE = {
   claude: { tag: 'CLD', color: '#FF7A45FF', dimColor: '#66301BFF' },
   codex: { tag: 'CDX', color: '#C084FCFF', dimColor: '#4E2A66FF' },
   chatgpt: { tag: 'CDX', color: '#C084FCFF', dimColor: '#4E2A66FF' },
+  phoenix: { tag: 'PHX', color: '#E85D26FF', dimColor: '#5C240EFF' },
+  'phoenix-code': { tag: 'PHX', color: '#E85D26FF', dimColor: '#5C240EFF' },
+  t3: { tag: 'PHX', color: '#E85D26FF', dimColor: '#5C240EFF' },
 };
 
 const UNICODE_ASCII_MAP = [

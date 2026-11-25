@@ -253,6 +253,30 @@ function makeScenarioSessions(scenario, now = Date.now()) {
         { id: 'done-1', provider: 'antigravity', project: 'busy-bar', title: 'Finished', activity: 'Done', status: 'done', updatedAtMs: now },
         { id: 'done-2', provider: 'claude-code', project: 'api', title: 'Tests passed', activity: 'Done', status: 'done', updatedAtMs: now - 1_000 },
       ];
+    case 'phoenix':
+      return [
+        {
+          id: 'phx-1',
+          provider: 'phoenix',
+          project: 'server',
+          title: 'Phoenix local agent',
+          activity: 'Run rtk pnpm test',
+          status: 'running',
+          turnStartedAtMs: now - 85_000,
+          updatedAtMs: now,
+        },
+        {
+          id: 'phx-2',
+          provider: 'phoenix',
+          project: 'web',
+          title: 'Migration check',
+          activity: 'Approve Bash: pnpm db:migrate',
+          status: 'waiting',
+          attentionKind: 'approval',
+          turnStartedAtMs: now - 140_000,
+          updatedAtMs: now - 45_000,
+        },
+      ];
     case 'mixed':
     default:
       return [
@@ -313,12 +337,12 @@ Usage:
   busy-bar dismiss --session <id> [--provider <name>]
   busy-bar sync-once [--no-blink]
   busy-bar emit --provider <name> --session <id> --status <running|waiting|error|done|idle> [options]
-  busy-bar test-screen [running|waiting|error|all_done|mixed|swarm] [--view <fleet|spotlight|pulse>] [--dry-run] [--no-blink] [--no-animations] [--no-timers]
+  busy-bar test-screen [running|waiting|error|all_done|mixed|swarm|phoenix] [--view <fleet|spotlight|pulse>] [--dry-run] [--no-blink] [--no-animations] [--no-timers]
   busy-bar test-chime [waiting|error|all_done]
   busy-bar sounds
   busy-bar alerts [--blink on|off] [--chime on|off]
   busy-bar watch-buttons
-  busy-bar hook <claude|codex|chatgpt|antigravity> [--event <name>]
+  busy-bar hook <claude|codex|chatgpt|antigravity|phoenix> [--event <name>]
   busy-bar install-hooks [all|antigravity|claude|codex|chatgpt ...] [--dry-run] [--uninstall]
   busy-bar install-service [--dry-run]
   busy-bar install-hook [--dry-run] [--uninstall]
@@ -690,7 +714,7 @@ async function cmdAgyStopHook(config) {
 async function cmdHook(config, args, flags) {
   const providerArg = String(args[0] || '').trim().toLowerCase();
   if (!providerArg) {
-    throw new Error('hook requires a target provider (claude, codex, chatgpt, or antigravity)');
+    throw new Error('hook requires a target provider (claude, codex, chatgpt, antigravity, or phoenix)');
   }
   if (providerArg === 'antigravity' || providerArg === 'agy') {
     await cmdAgyStopHook(config);
@@ -702,10 +726,15 @@ async function cmdHook(config, args, flags) {
     'claude-code': 'claude-code',
     codex: 'codex',
     chatgpt: 'codex',
+    phoenix: 'phoenix',
+    'phoenix-code': 'phoenix',
+    t3: 'phoenix',
   };
   const routeProvider = routeMap[providerArg];
   if (!routeProvider) {
-    throw new Error(`Unknown hook target "${providerArg}" (expected claude, codex, chatgpt, or antigravity)`);
+    throw new Error(
+      `Unknown hook target "${providerArg}" (expected claude, codex, chatgpt, antigravity, or phoenix)`
+    );
   }
 
   try {
