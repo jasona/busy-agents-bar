@@ -144,6 +144,7 @@ export function buildFleetSnapshot(
           id: primarySession.id,
           provider: primarySession.provider,
           project: primarySession.project,
+          title: primarySession.title,
           status: primarySession.status,
           attentionKind: primarySession.attentionKind,
           activity: trimAct(primarySession),

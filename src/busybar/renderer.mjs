@@ -341,7 +341,7 @@ function makeStatusIcon(phase) {
 }
 
 function renderFleetMode(snapshot, opts) {
-  const { config, urgency, dailyStats, deviceClockOffsetMs, now } = opts;
+  const { config, urgency, deviceClockOffsetMs, now } = opts;
   const displayCfg = config?.display || {};
   const showProjectName = displayCfg.showProjectName !== false;
   const useAnimations = displayCfg.animations !== false;
@@ -549,28 +549,31 @@ function renderFleetMode(snapshot, opts) {
       type: 'text',
       display: 'front',
       timeout: 0,
-      x: iconEl ? 13 : 37,
-      y: 1,
-      align: iconEl ? 'top_left' : 'top_mid',
-      text: 'ALL DONE',
-      font: 'small',
+      x: textX,
+      y: 0,
+      align: 'top_left',
+      text: `${counts.done} DONE`,
+      font: 'tiny',
       color: '#00FFAAFF',
     });
 
-    const totalDoneBadge = Math.max(counts.done, Number(dailyStats?.completed) || 0);
-    if (iconEl && totalDoneBadge > 1) {
-      elements.push({
+    const finished = snapshot.primarySession;
+    if (finished) {
+      const tag = getProviderMeta(finished.provider).tag;
+      const provider = { PHX: 'Phoenix', CDX: 'Codex', CLD: 'Claude', AGY: 'Antigravity' }[tag] || tag;
+      const task = finished.title !== finished.id
+        ? finished.title
+        : finished.project !== 'general' ? finished.project : '';
+      const label = `${provider}${task ? `: ${task}` : ''}`;
+      const completionEl = makeTinyTextRow({
         id: 'secondary',
-        type: 'text',
-        display: 'front',
-        timeout: 0,
-        x: 71,
-        y: 3,
-        align: 'top_right',
-        text: `x${totalDoneBadge}`,
-        font: 'tiny',
+        text: counts.done > 1 ? `Latest ${label}` : label,
+        x: textX,
+        y: 7,
+        maxWidth: DISPLAY_WIDTH - textX,
         color: '#88FFEEFF',
       });
+      if (completionEl) elements.push(completionEl);
     }
   } else {
     elements.push({
@@ -610,6 +613,7 @@ function renderSpotlightMode(snapshot, opts) {
   const idx = ((Number(spotlightIndex) || 0) % sessions.length + sessions.length) % sessions.length;
   const session = sessions[idx];
   const provMeta = getProviderMeta(session.provider);
+  const isPhoenix = ['phoenix', 'phoenix-code', 't3'].includes(String(session.provider || '').trim().toLowerCase());
   const statusColor = resolveSessionPipColor(session, snapshot.phase, urgency);
 
   const elements = [
@@ -636,7 +640,7 @@ function renderSpotlightMode(snapshot, opts) {
       x: 3,
       y: 0,
       align: 'top_left',
-      text: provMeta.tag,
+      text: isPhoenix ? 'Phoenix' : provMeta.tag,
       font: 'tiny',
       color: provMeta.color,
     },
@@ -680,7 +684,7 @@ function renderSpotlightMode(snapshot, opts) {
 
   const projEl = makeTinyTextRow({
     id: 'project',
-    text: projText,
+    text: isPhoenix ? '' : projText,
     color: '#FFFFFFFF',
     x: projStartX,
     y: 0,

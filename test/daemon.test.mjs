@@ -109,7 +109,7 @@ function startMockBusyBar() {
   });
 }
 
-test('BusyBarDaemon end-to-end: draw-on-change, ALL DONE latch, clear, hooks, alerts, 409, and reconnect', async () => {
+test('BusyBarDaemon end-to-end: draw-on-change, completion latch, clear, hooks, alerts, 409, and reconnect', async () => {
   const mock = await startMockBusyBar();
   const tmp = mkdtempSync(join(tmpdir(), 'busy-bar-daemon-'));
   const stateFile = join(tmp, 'state.json');
@@ -191,7 +191,7 @@ test('BusyBarDaemon end-to-end: draw-on-change, ALL DONE latch, clear, hooks, al
     assert.equal(mock.state.drawCalls.length, 3);
     assert.equal(Object.hasOwn(mock.state.drawCalls[2], 'led_notification_color'), false);
 
-    // Transition all sessions to done -> ALL DONE clears prior elements before drawing and stays latched
+    // Transition tracked sessions to done -> completion count clears prior elements and stays latched
     clock += 1000;
     const clearsBeforeAllDone = mock.state.clearCalls.length;
     fakeSessions = [
@@ -206,9 +206,9 @@ test('BusyBarDaemon end-to-end: draw-on-change, ALL DONE latch, clear, hooks, al
     assert.equal(mock.state.clearCalls.length, clearsBeforeAllDone + 1);
     assert.deepEqual(mock.state.events.slice(-2), [
       { type: 'clear', app: 'agent-status' },
-      { type: 'draw', primary: 'ALL DONE' },
+      { type: 'draw', primary: '2 DONE' },
     ]);
-    assert.equal(mock.state.drawCalls[3].elements.find((e) => e.id === 'primary').text, 'ALL DONE');
+    assert.equal(mock.state.drawCalls[3].elements.find((e) => e.id === 'primary').text, '2 DONE');
     assert.equal(mock.state.audioCalls.length, 1);
 
     clock += 600_000;

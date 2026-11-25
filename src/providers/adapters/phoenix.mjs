@@ -14,7 +14,7 @@ const REMOVE_EVENTS = new Set([
 ]);
 
 const DONE_TOKENS = new Set(['completed', 'done', 'stop', 'turncompleted']);
-const FAILED_TOKENS = new Set(['failed', 'limited', 'error', 'turnfailed']);
+const FAILED_TOKENS = new Set(['failed', 'limited', 'error', 'turnfailed', 'runerror']);
 const APPROVAL_TOKENS = new Set([
   'approval',
   'approval_request',
@@ -36,6 +36,7 @@ const ACTIVE_TOKENS = new Set([
   'userpromptsubmit',
   'pretooluse',
   'posttooluse',
+  'runstart',
   'runstarted',
 ]);
 
@@ -76,9 +77,15 @@ export function phoenixHookAdapter(providerName, payload, now = Date.now()) {
   const toolName = String(payload.toolName ?? payload.tool_name ?? '').trim();
   const toolInput = payload.tool_input ?? payload.input;
   const reqKind = String(payload.requestKind ?? payload.kind ?? '').trim().toLowerCase();
+  const notifType = String(payload.notification_type ?? payload.notificationType ?? '').trim().toLowerCase();
   const runStatus = String(payload.runStatus ?? payload.status ?? '').trim().toLowerCase();
   const evLower = event.toLowerCase();
   const msg = String(payload.activity ?? payload.message ?? payload.prompt ?? '').trim();
+  const explicitTurnStart = Number(payload.turnStartedAtMs ?? payload.startedAtMs);
+  const turnStartProps =
+    Number.isFinite(explicitTurnStart) && explicitTurnStart > 0
+      ? { turnStartedAtMs: explicitTurnStart }
+      : {};
 
   if (REMOVE_EVENTS.has(evLower) || REMOVE_EVENTS.has(runStatus)) {
     return { remove: true, sessionId, provider: CANONICAL_PROVIDER };
@@ -86,12 +93,51 @@ export function phoenixHookAdapter(providerName, payload, now = Date.now()) {
 
   const token = evLower || runStatus || reqKind;
 
-  if (APPROVAL_TOKENS.has(token) || APPROVAL_TOKENS.has(reqKind)) {
+  if (evLower === 'notification') {
+    if (notifType === 'permission_prompt' || APPROVAL_TOKENS.has(reqKind)) {
+      const act =
+        (msg && msg.toLowerCase() !== 'approval required' ? msg : '') ||
+        (toolName || toolInput !== undefined
+          ? describeHookToolActivity(toolName, toolInput, { approval: true })
+          : msg || 'Approval required');
+      return {
+        session: {
+          id: sessionId,
+          provider: CANONICAL_PROVIDER,
+          project,
+          title,
+          status: 'waiting',
+          attentionKind: 'approval',
+          activity: act,
+          ...turnStartProps,
+          updatedAtMs: now,
+        },
+      };
+    }
+    return {
+      session: {
+        id: sessionId,
+        provider: CANONICAL_PROVIDER,
+        project,
+        title,
+        status: 'waiting',
+        attentionKind: 'question',
+        activity: msg || (notifType === 'user_input' ? 'Input needed' : 'Attention needed'),
+        ...turnStartProps,
+        updatedAtMs: now,
+      },
+    };
+  }
+
+  const isHookLifecycleActiveOrTerminal =
+    ACTIVE_TOKENS.has(token) || DONE_TOKENS.has(token) || FAILED_TOKENS.has(token);
+
+  if (APPROVAL_TOKENS.has(token) || (!isHookLifecycleActiveOrTerminal && APPROVAL_TOKENS.has(reqKind))) {
     const act =
-      msg ||
+      (msg && msg.toLowerCase() !== 'approval required' ? msg : '') ||
       (toolName || toolInput !== undefined
         ? describeHookToolActivity(toolName, toolInput, { approval: true })
-        : 'Approval required');
+        : msg || 'Approval required');
     return {
       session: {
         id: sessionId,
@@ -101,12 +147,13 @@ export function phoenixHookAdapter(providerName, payload, now = Date.now()) {
         status: 'waiting',
         attentionKind: 'approval',
         activity: act,
+        ...turnStartProps,
         updatedAtMs: now,
       },
     };
   }
 
-  if (QUESTION_TOKENS.has(token) || QUESTION_TOKENS.has(reqKind)) {
+  if (QUESTION_TOKENS.has(token) || (!isHookLifecycleActiveOrTerminal && QUESTION_TOKENS.has(reqKind))) {
     return {
       session: {
         id: sessionId,
@@ -116,6 +163,7 @@ export function phoenixHookAdapter(providerName, payload, now = Date.now()) {
         status: 'waiting',
         attentionKind: 'question',
         activity: msg || 'Input needed',
+        ...turnStartProps,
         updatedAtMs: now,
       },
     };
@@ -134,6 +182,7 @@ export function phoenixHookAdapter(providerName, payload, now = Date.now()) {
         status: 'error',
         attentionKind: isQuota ? 'quota' : 'error',
         activity: errMsg,
+        ...turnStartProps,
         updatedAtMs: now,
       },
     };
@@ -169,6 +218,7 @@ export function phoenixHookAdapter(providerName, payload, now = Date.now()) {
         status: 'running',
         attentionKind: null,
         activity: act,
+        ...turnStartProps,
         updatedAtMs: now,
       },
     };
